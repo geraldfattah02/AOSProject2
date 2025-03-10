@@ -32,6 +32,9 @@ static void syscall_handler (struct intr_frame *f)
     case SYS_WRITE:
       handle_write(f->esp);
       return;
+    case SYS_EXIT:
+      // TODO: handle exit code, files
+      thread_exit ();
     default:
       printf ("system call %d!\n", syscall_id);
       thread_exit ();

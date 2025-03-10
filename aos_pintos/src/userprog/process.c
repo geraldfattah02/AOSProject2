@@ -17,15 +17,16 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/malloc.h"
 
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool load (const char *cmdline, void (**eip) (void), void **esp, char *file_and_args);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
-tid_t process_execute (const char *file_name)
+tid_t process_execute (const char *file_and_args)
 {
   char *fn_copy;
   tid_t tid;
@@ -35,7 +36,10 @@ tid_t process_execute (const char *file_name)
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  strlcpy (fn_copy, file_and_args, PGSIZE);
+
+  char *file_name, *unparsed_args;
+  file_name = strtok_r (file_and_args, " ", &unparsed_args);
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
@@ -46,9 +50,11 @@ tid_t process_execute (const char *file_name)
 
 /* A thread function that loads a user process and starts it
    running. */
-static void start_process (void *file_name_)
+static void start_process (void *file_and_args)
 {
-  char *file_name = file_name_;
+  char *file_name, *unparsed_args;
+  file_name = strtok_r (file_and_args, " ", &unparsed_args);
+
   struct intr_frame if_;
   bool success;
 
@@ -57,7 +63,7 @@ static void start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (file_name, &if_.eip, &if_.esp, file_and_args);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -192,7 +198,7 @@ struct Elf32_Phdr
 #define PF_W 2 /* Writable. */
 #define PF_R 4 /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp, char *file_and_args);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -202,7 +208,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
-bool load (const char *file_name, void (**eip) (void), void **esp)
+bool load (const char *file_name, void (**eip) (void), void **esp, char *file_and_args)
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -296,7 +302,7 @@ bool load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp, file_and_args))
     goto done;
 
   /* Start address. */
@@ -417,9 +423,81 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
   return true;
 }
 
+struct argument {
+  struct list_elem elem;
+  char *value;
+  int len;
+  void *addr;
+};
+
+static void pass_arguments (char **esp, char *file_and_args)
+{
+  struct list args;
+  list_init (&args);
+
+  printf("file and args: %s\n", file_and_args);
+
+  char *token, *save_ptr;
+  for (token = strtok_r (file_and_args, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
+  {
+    struct argument *arg = malloc(sizeof (struct argument));
+    arg->value = token;
+    printf("token: %s\n", token);
+    arg->len = strlen(token) + 1;
+
+    *esp -= arg->len;
+    memcpy(*esp, arg->value, arg->len);
+    printf("token at esp: %s\n", *esp);
+    arg->addr = *esp;
+    
+    list_push_front (&args, &arg->elem);
+  }
+
+  hex_dump(*esp, *esp, 64, true);
+
+  // Word alignment 
+  *esp -= ((uint32_t) *esp) % 4;
+
+  hex_dump(*esp, *esp, 64, true);
+
+  // Add NULL sentinel
+  *esp -= 4;
+  *(uint32_t*) *esp = NULL;
+
+  hex_dump(*esp, *esp, 64, true);
+
+  // Add arguments
+  int argc = 0;
+  while (!list_empty (&args)) {
+    struct list_elem *e = list_pop_front (&args);
+    struct argument *arg = list_entry (e, struct argument, elem);
+
+    *esp -= 4;
+    *(uint32_t*) *esp = arg->addr;
+    argc += 1;
+
+    free(arg);
+  }
+
+  hex_dump(*esp, *esp, 64, true);
+
+  // Add argv
+  *esp -= 4;
+  *(uint32_t*) *esp = *esp + 4;
+
+  // Add argc
+  *esp -= 4;
+  *(uint32_t*) *esp = argc;
+
+  // Empty return address
+  *esp -= 4;
+  *(uint32_t*) *esp = NULL;
+  hex_dump(*esp, *esp, 64, true);
+}
+
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
-static bool setup_stack (void **esp)
+static bool setup_stack (void **esp, char *file_and_args)
 {
   uint8_t *kpage;
   bool success = false;
@@ -429,7 +507,11 @@ static bool setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = (int*)PHYS_BASE - 12;
+      {
+        *esp = PHYS_BASE;
+
+        pass_arguments(esp, file_and_args);
+      }
       else
         palloc_free_page (kpage);
     }
