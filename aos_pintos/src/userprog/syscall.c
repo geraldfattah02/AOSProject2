@@ -70,8 +70,7 @@ static void syscall_handler (struct intr_frame *f)
       f->eax = filesize(*((uint32_t*)f->esp+1));
   		break;
     case SYS_CREATE:
-      f->eax = create(*((uint32_t*)f->esp+1), *((uint32_t*)f->esp+2));
-      break;
+      f->eax = create((const char*)*((uint32_t*)f->esp + 1), *((unsigned*)f->esp + 2));      break;
     case SYS_REMOVE:
       break;
     case SYS_OPEN:
