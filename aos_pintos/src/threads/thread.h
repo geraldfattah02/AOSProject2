@@ -109,6 +109,7 @@ struct thread
   uint32_t *pagedir; /* Page directory. */
   struct list child_records;
   struct child_thread *parent_record;
+  struct list file_descriptors;  
 #endif
 
   /* Owned by thread.c. */
