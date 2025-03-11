@@ -26,6 +26,7 @@ struct child_thread
    int exit_code;
    struct semaphore wait_child;
    struct list_elem elem;
+   bool loaded_successfully;  // Track successful loading
 };
 
 /* Thread priorities. */

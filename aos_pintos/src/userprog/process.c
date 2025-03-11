@@ -49,7 +49,36 @@ tid_t process_execute (const char *file_and_args)
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy, record);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
+
+  record->loaded_successfully = false;
+
+  tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy, record);
+  if (tid == TID_ERROR) {
+      palloc_free_page(fn_copy);
+      return TID_ERROR;
+  }
+
+  // Wait until the child process loads
+  sema_down(&record->wait_child);
+  if (!record->loaded_successfully) {
+      return -1;
+  }
+
   return tid;
+}
+
+// search for child record within the parent's child_records list
+struct child_thread *get_child_record(tid_t child_tid) {
+  struct thread *parent = thread_current();
+  struct list_elem *e;
+
+  for (e = list_begin(&parent->child_records); e != list_end(&parent->child_records); e = list_next(e)) {
+      struct child_thread *record = list_entry(e, struct child_thread, elem);
+      if (record->tid == child_tid) {
+          return record;
+      }
+  }
+  return NULL; // Child not found
 }
 
 /* A thread function that loads a user process and starts it
@@ -69,6 +98,12 @@ static void start_process (void *file_and_args)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp, unparsed_args);
+
+  struct thread *t = thread_current();
+  if (t->parent_record) {
+      t->parent_record->loaded_successfully = success;
+      sema_up(&t->parent_record->wait_child);
+  }
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
