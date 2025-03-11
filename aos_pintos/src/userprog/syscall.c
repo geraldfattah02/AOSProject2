@@ -6,6 +6,7 @@
 #include "threads/thread.h"
 #include <string.h>
 #include "threads/vaddr.h"
+#include "userprog/process.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -29,19 +30,32 @@ static void set_exit_code(struct thread *t, int code)
     t->parent_record->exit_code = code;
 }
 
+static bool has_bad_boundary(char *ptr)
+{
+  return validate_user_pointer(ptr) == NULL || validate_user_pointer(ptr + 3) == NULL;
+}
+
 static void syscall_handler (struct intr_frame *f)
 {
-  // Check if esp is valid, and the arguments (at most 3) are not in kernel space
-  if (validate_user_pointer(f->esp) == NULL || is_kernel_vaddr((int*)f->esp + 3) || (uint32_t)f->esp % 4 != 0)
+  // printf ("system call %p\n", f->esp);
+  // printf("mod 4: %d\n", (uint32_t)f->esp % 4);
+  // printf("has bad boundary %d\n", has_bad_boundary(f->esp));
+
+  // Check if esp is valid and aligned, and that the arguments (at most 3) are not in kernel space
+  if (validate_user_pointer(f->esp) == NULL || is_kernel_vaddr((int*)f->esp + 3) || has_bad_boundary(f->esp))
   {
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
-  // printf ("system call %p\n", f->esp);
   int syscall_id = *((int*) f->esp);
   // printf ("system call %d!\n", syscall_id);
 
   switch (syscall_id) {
+    case SYS_HALT:
+      shutdown_power_off();
+    case SYS_WAIT:
+      handle_wait(f->esp);
+      return;
     case SYS_WRITE:
       handle_write(f->esp);
       return;
@@ -69,5 +83,11 @@ void handle_write(void *stack)
   {
     printf ("Unknown fd %d!\n", fd);
   }
+}
+
+void handle_wait(void *stack)
+{
+  tid_t tid = *((int*)stack+1);
+  return process_wait(tid);
 }
   
