@@ -132,7 +132,7 @@ void write(void *stack)
   if (fd == 1)
   {
     putbuf (buffer, size);
-    return
+    return;
   }
   
   printf ("Unknown fd %d!\n", fd);
