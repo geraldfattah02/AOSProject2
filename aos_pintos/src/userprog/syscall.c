@@ -9,6 +9,7 @@
 #include "userprog/process.h"
 #include "threads/malloc.h"
 #include "filesys/filesys.h"
+#include "filesys/file.h"
 #include <stdlib.h>
 
 #define MAX_FILE_NAME 14
@@ -24,7 +25,7 @@ struct file_descriptor
 };
 
 static bool create(const char *file_name, off_t initial_size);
-
+static int read(int fd, const void *buffer, unsigned size);
 
 static void syscall_handler (struct intr_frame *);
 static struct lock files_lock; 
@@ -78,7 +79,7 @@ static void syscall_handler (struct intr_frame *f)
       handle_wait(f->esp);
       return;
     case SYS_WRITE:
-      write(f->esp);
+      f->eax = write(f->esp);
       return;
     case SYS_EXIT:
       //printf("Calling SYS_EXIT\n");
@@ -97,6 +98,7 @@ static void syscall_handler (struct intr_frame *f)
       f->eax = open(*((uint32_t*)f->esp+1));
       break;
     case SYS_READ:
+      f->eax = read(*((uint32_t*)f->esp+1), *((uint32_t*)f->esp+2), *((uint32_t*)f->esp+3));
       break;
     case SYS_CLOSE:
       close(*((uint32_t*)f->esp+1));
@@ -124,7 +126,7 @@ static bool create(const char *file_name, off_t initial_size)
   return success;
 }
 
-void write(void *stack)
+int write(void *stack)
 {
   int fd = *((int*)stack+1);
   char *buffer = *((int*)stack+2);
@@ -132,10 +134,29 @@ void write(void *stack)
   if (fd == 1)
   {
     putbuf (buffer, size);
-    return;
+    return size;
   }
   
-  printf ("Unknown fd %d!\n", fd);
+
+  if (validate_user_pointer(buffer) == NULL)
+  {
+    set_exit_code (thread_current (), -1);
+    thread_exit ();
+  }
+
+  lock_acquire(&files_lock);
+  struct file_descriptor *file_descriptor = get_file_descriptor(fd);
+  if (file_descriptor == NULL)
+  {
+    lock_release(&files_lock);
+    return 0;
+  }
+  
+  off_t bytes_written = file_write (file_descriptor->file, buffer, size);
+
+  lock_release(&files_lock);
+
+  return bytes_written;
 }
 
 void handle_wait(void *stack)
@@ -240,5 +261,28 @@ bool compare_file_descriptors(const struct list_elem *a, const struct list_elem 
   struct file_descriptor *f1 = list_entry(a, struct file_descriptor, elem);
   struct file_descriptor *f2 = list_entry(b, struct file_descriptor, elem);
   return f1->fd > f2->fd;
+}
+
+static int read(int fd, const void *buffer, unsigned size)
+{
+  if (validate_user_pointer(buffer) == NULL)
+  {
+    set_exit_code (thread_current (), -1);
+    thread_exit ();
+  }
+
+  lock_acquire(&files_lock);
+  struct file_descriptor *file_descriptor = get_file_descriptor(fd);
+  if (file_descriptor == NULL)
+  {
+    lock_release(&files_lock);
+    return;
+  }
+  
+  off_t bytes_read = file_read (file_descriptor->file, buffer, size);
+
+  lock_release(&files_lock);
+
+  return bytes_read;
 }
   
