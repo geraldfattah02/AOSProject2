@@ -5,6 +5,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include <string.h>
+#include "threads/vaddr.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -22,18 +23,32 @@ static void *validate_user_pointer(void *user_ptr)
   return pagedir_get_page (t->pagedir, user_ptr); // Return kernel virtual address, or NULL if unmapped
 }
 
+static void set_exit_code(struct thread *t, int code)
+{
+  if (t->parent_record != NULL)
+    t->parent_record->exit_code = code;
+}
+
 static void syscall_handler (struct intr_frame *f)
 {
-  printf ("system call!\n");
+  // Check if esp is valid, and the arguments (at most 3) are not in kernel space
+  if (validate_user_pointer(f->esp) == NULL || is_kernel_vaddr((int*)f->esp + 3) || (uint32_t)f->esp % 4 != 0)
+  {
+    set_exit_code (thread_current (), -1);
+    thread_exit ();
+  }
+  // printf ("system call %p\n", f->esp);
   int syscall_id = *((int*) f->esp);
-  printf ("system call %d!\n", syscall_id);
+  // printf ("system call %d!\n", syscall_id);
 
   switch (syscall_id) {
     case SYS_WRITE:
       handle_write(f->esp);
       return;
     case SYS_EXIT:
+      //printf("Calling SYS_EXIT\n");
       // TODO: handle exit code, files
+      set_exit_code (thread_current (), *((int*)f->esp+1));
       thread_exit ();
     default:
       printf ("system call %d!\n", syscall_id);

@@ -20,7 +20,7 @@
 #include "threads/malloc.h"
 
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp, char *file_and_args);
+static bool load (const char *cmdline, void (**eip) (void), void **esp, char *unparsed_args);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -41,8 +41,12 @@ tid_t process_execute (const char *file_and_args)
   char *file_name, *unparsed_args;
   file_name = strtok_r (file_and_args, " ", &unparsed_args);
 
+  struct child_thread *record = malloc (sizeof (struct child_thread));
+  list_push_back (&thread_current ()->child_records, &record->elem);
+  sema_init (&record->wait_child, 0);
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy, record);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
   return tid;
@@ -52,6 +56,7 @@ tid_t process_execute (const char *file_and_args)
    running. */
 static void start_process (void *file_and_args)
 {
+  // printf("start: %s\n", file_and_args);
   char *file_name, *unparsed_args;
   file_name = strtok_r (file_and_args, " ", &unparsed_args);
 
@@ -63,7 +68,7 @@ static void start_process (void *file_and_args)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp, file_and_args);
+  success = load (file_name, &if_.eip, &if_.esp, unparsed_args);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -91,9 +96,26 @@ static void start_process (void *file_and_args)
    does nothing. */
 int process_wait (tid_t child_tid UNUSED)
 {
-  while (true);
+  struct list_elem *e;
+  struct child_thread *child;
+  struct list *list = &thread_current ()->child_records;
+  for (e = list_begin (list); e != list_end (list); e = list_next (e))
+  {
+    child = list_entry (e, struct child_thread, elem);
+    if (child->tid == child_tid)
+      break;
+  }
+
+  if (e == list_tail(list)) // No child with this tid
+    return -1;
+
+  sema_down (&child->wait_child);
+  int exit_code = child->exit_code;
   
-  return -1;
+  list_remove(&child->elem);
+  free(child);
+
+  return exit_code;
 }
 
 /* Free the current process's resources. */
@@ -198,7 +220,7 @@ struct Elf32_Phdr
 #define PF_W 2 /* Writable. */
 #define PF_R 4 /* Readable. */
 
-static bool setup_stack (void **esp, char *file_and_args);
+static bool setup_stack (void **esp, char *file_name, char *args);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -208,7 +230,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
-bool load (const char *file_name, void (**eip) (void), void **esp, char *file_and_args)
+bool load (const char *file_name, void (**eip) (void), void **esp, char *unparsed_args)
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -302,7 +324,7 @@ bool load (const char *file_name, void (**eip) (void), void **esp, char *file_an
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp, file_and_args))
+  if (!setup_stack (esp, file_name, unparsed_args))
     goto done;
 
   /* Start address. */
@@ -430,41 +452,43 @@ struct argument {
   void *addr;
 };
 
-static void pass_arguments (char **esp, char *file_and_args)
+static void pass_arguments (char **esp, char *file_name, char *unparsed_args)
 {
   struct list args;
   list_init (&args);
 
-  printf("file and args: %s\n", file_and_args);
+  // printf("file and args: %s %s\n", file_name, args);
+
+  struct argument *arg = malloc(sizeof (struct argument));
+  arg->value = file_name;
+  arg->len = strlen(file_name) + 1;
+
+  *esp -= arg->len;
+  memcpy(*esp, arg->value, arg->len);
+  arg->addr = *esp;
+  
+  list_push_front (&args, &arg->elem);
 
   char *token, *save_ptr;
-  for (token = strtok_r (file_and_args, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
+  for (token = strtok_r (unparsed_args, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
   {
     struct argument *arg = malloc(sizeof (struct argument));
     arg->value = token;
-    printf("token: %s\n", token);
     arg->len = strlen(token) + 1;
 
     *esp -= arg->len;
     memcpy(*esp, arg->value, arg->len);
-    printf("token at esp: %s\n", *esp);
     arg->addr = *esp;
     
     list_push_front (&args, &arg->elem);
   }
 
-  hex_dump(*esp, *esp, 64, true);
-
   // Word alignment 
   *esp -= ((uint32_t) *esp) % 4;
-
-  hex_dump(*esp, *esp, 64, true);
 
   // Add NULL sentinel
   *esp -= 4;
   *(uint32_t*) *esp = NULL;
-
-  hex_dump(*esp, *esp, 64, true);
 
   // Add arguments
   int argc = 0;
@@ -479,8 +503,6 @@ static void pass_arguments (char **esp, char *file_and_args)
     free(arg);
   }
 
-  hex_dump(*esp, *esp, 64, true);
-
   // Add argv
   *esp -= 4;
   *(uint32_t*) *esp = *esp + 4;
@@ -492,12 +514,12 @@ static void pass_arguments (char **esp, char *file_and_args)
   // Empty return address
   *esp -= 4;
   *(uint32_t*) *esp = NULL;
-  hex_dump(*esp, *esp, 64, true);
+  //hex_dump(*esp, *esp, 64, true);
 }
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
-static bool setup_stack (void **esp, char *file_and_args)
+static bool setup_stack (void **esp, char *file_name, char *args)
 {
   uint8_t *kpage;
   bool success = false;
@@ -510,7 +532,7 @@ static bool setup_stack (void **esp, char *file_and_args)
       {
         *esp = PHYS_BASE;
 
-        pass_arguments(esp, file_and_args);
+        pass_arguments(esp, file_name, args);
       }
       else
         palloc_free_page (kpage);
