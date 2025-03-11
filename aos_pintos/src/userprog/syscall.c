@@ -10,6 +10,7 @@
 #include "threads/malloc.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
+#include "process.h"
 #include <stdlib.h>
 
 #define MAX_FILE_NAME 14
@@ -37,16 +38,20 @@ void syscall_init (void)
   lock_init(&files_lock);
 }
 
-static void *validate_user_pointer(void *user_ptr)
+static void *validate_user_pointer (void *user_ptr)
 {
-  if (user_ptr == NULL) return NULL;              // Pointer is NULL
-  if (is_kernel_vaddr (user_ptr)) return NULL;    // Pointer to kernel virtual address space
+  if (user_ptr == NULL)
+    return NULL; // Pointer is NULL
+  if (is_kernel_vaddr (user_ptr))
+    return NULL; // Pointer to kernel virtual address space
 
   struct thread *t = thread_current ();
-  return pagedir_get_page (t->pagedir, user_ptr); // Return kernel virtual address, or NULL if unmapped
+  return pagedir_get_page (
+      t->pagedir,
+      user_ptr); // Return kernel virtual address, or NULL if unmapped
 }
 
-static void set_exit_code(struct thread *t, int code)
+static void set_exit_code (struct thread *t, int code)
 {
   if (t->parent_record != NULL)
     t->parent_record->exit_code = code;
@@ -55,6 +60,26 @@ static void set_exit_code(struct thread *t, int code)
 static bool has_bad_boundary(char *ptr)
 {
   return validate_user_pointer(ptr) == NULL || validate_user_pointer(ptr + 3) == NULL;
+}
+
+tid_t exec (const char *cmd_line) {
+  if (validate_user_pointer(cmd_line) == NULL) {
+    return -1;
+  }
+  tid_t child_pid = process_execute(cmd_line);
+  struct child_thread *child_record = get_child_record(child_pid);
+
+  if (child_record == NULL) {
+      return -1;
+  } else {
+      sema_down(&child_record->wait_child);
+      if (child_record->loaded_successfully) {
+          return child_pid;
+      } else {
+          return -1;
+      }
+  }
+  return child_pid;
 }
 
 static void syscall_handler (struct intr_frame *f)
@@ -103,6 +128,11 @@ static void syscall_handler (struct intr_frame *f)
     case SYS_CLOSE:
       close(*((uint32_t*)f->esp+1));
       break;
+    case SYS_EXEC: {
+      char *cmd_line = *((char **) f->esp + 1); // pointer to first argument
+      f->eax = exec (cmd_line);
+      break;
+    }
     default:
       printf ("system call %d!\n", syscall_id);
       thread_exit ();
@@ -128,9 +158,9 @@ static bool create(const char *file_name, off_t initial_size)
 
 int write(void *stack)
 {
-  int fd = *((int*)stack+1);
-  char *buffer = *((int*)stack+2);
-  int size = *((int*)stack+3);
+  int fd = *((int *) stack + 1);
+  char *buffer = *((int *) stack + 2);
+  int size = *((int *) stack + 3);
   if (fd == 1)
   {
     putbuf (buffer, size);
@@ -285,4 +315,3 @@ static int read(int fd, const void *buffer, unsigned size)
 
   return bytes_read;
 }
-  
