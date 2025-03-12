@@ -3,7 +3,6 @@
 #include <syscall-nr.h>
 #include "devices/block.h"
 #include "threads/interrupt.h"
-#include "threads/thread.h"
 #include <string.h>
 #include "threads/vaddr.h"
 #include "userprog/process.h"
@@ -86,7 +85,9 @@ tid_t exec (const char *cmd_line) {
   }
 
   lock_acquire(&files_lock);
+  //printf("acquire Exec lock\n");
   tid_t child_pid = process_execute(kernel_space_cmd);
+  //printf("release Exec lock\n");
   lock_release(&files_lock);
 
   struct child_thread *child_record = get_child_record(child_pid);
@@ -212,19 +213,30 @@ static unsigned tell(int fd)
 
 static int symlink(char *target, char *linkpath)
 {
-  if (validate_user_pointer(target) == NULL || validate_user_pointer(linkpath))
+  //printf("%s %s\n", target, linkpath);
+  if (validate_user_pointer(target) == NULL || validate_user_pointer(linkpath) == NULL)
   {
+    //printf("Bad ptr %d %d\n", validate_user_pointer(target), validate_user_pointer(linkpath));
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
-  if (strlen(target) > MAX_FILE_NAME || strlen(linkpath))
+
+  if (strlen(target) > MAX_FILE_NAME || strlen(linkpath) > MAX_FILE_NAME)
   {
     return -1;
   }
 
   lock_acquire(&files_lock);
+  struct file *target_file = filesys_open(target);
+  if (target_file == NULL){
+    lock_release(&files_lock);
+    return -1;
+  }
+
   bool success = filesys_symlink(target, linkpath);
   lock_release(&files_lock);
+
+  //printf("filesys_symlink %d\n", success);
   return success ? 0 : -1;
 }
 
@@ -308,35 +320,44 @@ int filesize(int fd) {
     return -1;
   }
 
-  lock_release(&files_lock);
   int size = file_length(file_descriptor->file);
-  return file_length(file_descriptor->file); // Return the length of the file
+  lock_release(&files_lock);
+  return size; // Return the length of the file
 }
 
 int open(char *file_name)
 {
+  //printf("Calling open %s\n", file_name);
   if (validate_user_pointer(file_name) == NULL)
   {
+    //printf("Invalid user pointer %s\n", file_name);
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
   if (strlen(file_name) > MAX_FILE_NAME)
   {
+    //printf("Invalid file len %s\n", file_name);
     return -1;
   }
 
   lock_acquire(&files_lock);
+  //printf("Got lock\n");
   struct file *file = filesys_open(file_name);
   struct list *fd_list = &thread_current()->file_descriptors;
 
   if (file == NULL)
   {
+    //printf("NULL file \"%s\"\n", file_name);
     lock_release(&files_lock);
     return -1;
   }
 
   struct thread *t = thread_current ();
   struct file_descriptor *current_fd_struct = malloc(sizeof(struct file_descriptor));
+  if (current_fd_struct == NULL) {
+    lock_release(&files_lock);
+    return -1;
+  }
   current_fd_struct->file = file;
 
   int next_fd = 10;
@@ -354,6 +375,7 @@ int open(char *file_name)
   current_fd_struct->fd = head_fd_struct->fd + 1;
   list_insert_ordered(fd_list, &current_fd_struct->elem, compare_file_descriptors, NULL);*/
 
+  //printf("Returning %d for %p (%s)\n", current_fd_struct->fd, current_fd_struct->file->inode, file_name);
 
   lock_release(&files_lock);
   return current_fd_struct->fd;
@@ -362,15 +384,18 @@ int open(char *file_name)
 void close(int fd)
 {
   lock_acquire(&files_lock);
+  //printf("Got close lock\n");
   struct file_descriptor *file_descriptor = get_file_descriptor(fd);
   if (file_descriptor == NULL)
   {
+    //printf("fd IS NULL!!\n");
     lock_release(&files_lock);
     return;
   }
   list_remove(&file_descriptor->elem);
   file_close(file_descriptor->file);
   free(file_descriptor);
+  //printf("Closed (release lock)\n");
   lock_release(&files_lock);
 }
 
@@ -417,4 +442,20 @@ static int read(int fd, const void *buffer, unsigned size)
   lock_release(&files_lock);
 
   return bytes_read;
+}
+
+void free_thread_files(struct thread *t)
+{
+  lock_acquire(&files_lock);
+  file_close(t->executable);
+
+  while (!list_empty (&t->file_descriptors))
+    {
+      struct list_elem *e = list_pop_front (&t->file_descriptors);
+      struct file_descriptor *f = list_entry (e, struct file_descriptor, elem);
+      file_close(f->file);
+      free(f);
+    }
+
+  lock_release(&files_lock);
 }

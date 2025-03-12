@@ -13,6 +13,7 @@
 #include "threads/vaddr.h"
 #include "threads/malloc.h"
 #include "../filesys/file.h"
+#include "userprog/syscall.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -278,17 +279,17 @@ void thread_exit (void)
   process_exit ();
 #endif
 
+  free_thread_files (thread_current ());
+
   struct child_thread *parent = thread_current ()->parent_record;
-  int exit_code = 0;
   if (parent != NULL)
   {
+    printf("%s: exit(%d)\n", thread_current ()->name, parent->exit_code);
     sema_up (&parent->wait_child);
-    exit_code = parent->exit_code;
   }
-
-  file_close(thread_current ()->executable);
-
-  printf("%s: exit(%d)\n", thread_current ()->name, exit_code);
+  else {
+    printf("%s: exit(%d)\n", thread_current ()->name, 0);
+  }
 
   struct child_thread *child;
   struct list *list = &thread_current ()->child_records;

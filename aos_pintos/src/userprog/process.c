@@ -50,6 +50,12 @@ tid_t process_execute (const char *file_and_args)
 
   record->loaded_successfully = false;
 
+  struct file *executable = filesys_open(file_name);
+  if (executable == NULL) {
+    return -1;
+  }
+  file_close(executable);
+
   tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy, record);
   if (tid == TID_ERROR) {
       palloc_free_page(fn_copy);
@@ -97,21 +103,24 @@ static void start_process (void *file_and_args)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp, unparsed_args);
 
-  struct thread *t = thread_current();
-  if (t->parent_record) {
-      if (!success) {
-        t->parent_record->exit_code = -1;
-      }
-      t->parent_record->loaded_successfully = success;
-      sema_up(&t->parent_record->wait_child);
-  }
-
   if (success)
   {
     struct file *executable = filesys_open(file_name);
     thread_current ()->executable = executable;
     file_deny_write(executable);
     //printf("Locked the executable %p\n", executable->inode);
+  }
+
+  // Must come after file accesses above.
+  // - sema_up will wake up the parent, which might
+  //   also try to access the file system => race condition
+  struct thread *t = thread_current();
+  if (t->parent_record) {
+    if (!success) {
+      t->parent_record->exit_code = -1;
+    }
+    t->parent_record->loaded_successfully = success;
+    sema_up(&t->parent_record->wait_child);
   }
 
   /* If load failed, quit. */
@@ -496,7 +505,7 @@ struct argument {
   void *addr;
 };
 
-static void pass_arguments (char **esp, char *file_name, char *unparsed_args)
+static bool pass_arguments (char **esp, char *file_name, char *unparsed_args)
 {
   struct list args;
   list_init (&args);
@@ -504,6 +513,9 @@ static void pass_arguments (char **esp, char *file_name, char *unparsed_args)
   // printf("file and args: %s %s\n", file_name, args);
 
   struct argument *arg = malloc(sizeof (struct argument));
+  if (arg == NULL) {
+    return false;
+  }
   arg->value = file_name;
   arg->len = strlen(file_name) + 1;
 
@@ -517,6 +529,9 @@ static void pass_arguments (char **esp, char *file_name, char *unparsed_args)
   for (token = strtok_r (unparsed_args, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
   {
     struct argument *arg = malloc(sizeof (struct argument));
+    if (arg == NULL) {
+      return false;
+    }
     arg->value = token;
     arg->len = strlen(token) + 1;
 
@@ -559,6 +574,8 @@ static void pass_arguments (char **esp, char *file_name, char *unparsed_args)
   *esp -= 4;
   *(uint32_t*) *esp = NULL;
   //hex_dump(*esp, *esp, 64, true);
+
+  return true;
 }
 
 /* Create a minimal stack by mapping a zeroed page at the top of
