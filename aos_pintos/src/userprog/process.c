@@ -39,6 +39,7 @@ tid_t process_execute (const char *file_and_args)
   strlcpy (fn_copy, file_and_args, PGSIZE);
 
   char *file_name, *unparsed_args;
+  // printf("%s\n", file_and_args);
   file_name = strtok_r (file_and_args, " ", &unparsed_args);
 
   struct child_thread *record = malloc (sizeof (struct child_thread));
@@ -46,9 +47,6 @@ tid_t process_execute (const char *file_and_args)
   sema_init (&record->wait_child, 0);
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy, record);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy);
 
   record->loaded_successfully = false;
 
@@ -101,8 +99,19 @@ static void start_process (void *file_and_args)
 
   struct thread *t = thread_current();
   if (t->parent_record) {
+      if (!success) {
+        t->parent_record->exit_code = -1;
+      }
       t->parent_record->loaded_successfully = success;
       sema_up(&t->parent_record->wait_child);
+  }
+
+  if (success)
+  {
+    struct file *executable = filesys_open(file_name);
+    thread_current ()->executable = executable;
+    file_deny_write(executable);
+    //printf("Locked the executable %p\n", executable->inode);
   }
 
   /* If load failed, quit. */
@@ -294,7 +303,7 @@ bool load (const char *file_name, void (**eip) (void), void **esp, char *unparse
       ehdr.e_machine != 3 || ehdr.e_version != 1 ||
       ehdr.e_phentsize != sizeof (struct Elf32_Phdr) || ehdr.e_phnum > 1024)
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      printf ("load: %s: error loading executable %p\n", file_name, file->inode);
       goto done;
     }
 

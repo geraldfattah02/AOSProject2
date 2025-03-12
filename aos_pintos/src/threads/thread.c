@@ -12,6 +12,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "threads/malloc.h"
+#include "../filesys/file.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -284,6 +285,8 @@ void thread_exit (void)
     sema_up (&parent->wait_child);
     exit_code = parent->exit_code;
   }
+
+  file_close(thread_current ()->executable);
 
   printf("%s: exit(%d)\n", thread_current ()->name, exit_code);
 

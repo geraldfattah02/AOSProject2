@@ -111,6 +111,7 @@ struct thread
   struct list child_records;
   struct child_thread *parent_record;
   struct list file_descriptors;  
+  struct file *executable;
 #endif
 
   /* Owned by thread.c. */

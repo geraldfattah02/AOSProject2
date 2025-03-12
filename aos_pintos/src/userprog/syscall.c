@@ -7,6 +7,7 @@
 #include <string.h>
 #include "threads/vaddr.h"
 #include "userprog/process.h"
+#include "userprog/pagedir.h"
 #include "threads/malloc.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
@@ -27,6 +28,10 @@ struct file_descriptor
 
 static bool create(const char *file_name, off_t initial_size);
 static int read(int fd, const void *buffer, unsigned size);
+static void seek(int fd, unsigned position);
+static bool remove(const char *file_name);
+static unsigned tell(int fd);
+static int symlink(char *target, char *linkpath);
 
 static void syscall_handler (struct intr_frame *);
 static struct lock files_lock; 
@@ -59,17 +64,34 @@ static void set_exit_code (struct thread *t, int code)
 
 static bool has_bad_boundary(char *ptr)
 {
-  return validate_user_pointer(ptr) == NULL || validate_user_pointer(ptr + 3) == NULL;
+  // +15 needed for boundary checking the entire system call (id + 3 args)
+  return validate_user_pointer(ptr) == NULL || validate_user_pointer(ptr + 15) == NULL;
 }
 
 tid_t exec (const char *cmd_line) {
-  if (validate_user_pointer(cmd_line) == NULL) {
-    return -1;
+  
+  //printf("%p\n", cmd_line);
+  char *kernel_space_cmd = validate_user_pointer(cmd_line);
+  if (kernel_space_cmd == NULL)
+  {
+    set_exit_code (thread_current (), -1);
+    thread_exit ();
   }
-  tid_t child_pid = process_execute(cmd_line);
+
+  uint32_t len = strlen(kernel_space_cmd);
+  if (validate_user_pointer(cmd_line + len) == NULL)
+  {
+    set_exit_code (thread_current (), -1);
+    thread_exit ();
+  }
+
+  lock_acquire(&files_lock);
+  tid_t child_pid = process_execute(kernel_space_cmd);
+  lock_release(&files_lock);
+
   struct child_thread *child_record = get_child_record(child_pid);
 
-  if (child_record == NULL) {
+  /*if (child_record == NULL) {
       return -1;
   } else {
       sema_down(&child_record->wait_child);
@@ -78,7 +100,7 @@ tid_t exec (const char *cmd_line) {
       } else {
           return -1;
       }
-  }
+  }*/
   return child_pid;
 }
 
@@ -94,6 +116,13 @@ static void syscall_handler (struct intr_frame *f)
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
+
+  /*if (has_bad_boundary((int*)f->esp+1))
+  {
+    set_exit_code (thread_current (), -1);
+    thread_exit ();
+  }*/
+
   int syscall_id = *((int*) f->esp);
   // printf ("system call %d!\n", syscall_id);
 
@@ -101,7 +130,7 @@ static void syscall_handler (struct intr_frame *f)
     case SYS_HALT:
       shutdown_power_off();
     case SYS_WAIT:
-      handle_wait(f->esp);
+      f->eax = handle_wait(f->esp);
       return;
     case SYS_WRITE:
       f->eax = write(f->esp);
@@ -118,6 +147,13 @@ static void syscall_handler (struct intr_frame *f)
       f->eax = create(*((uint32_t*)f->esp+1), *((uint32_t*)f->esp+2));
       break;
     case SYS_REMOVE:
+      f->eax = remove(*((uint32_t*)f->esp+1));
+      break;
+    case SYS_TELL:
+      f->eax = tell(*((uint32_t*)f->esp+1));
+      break;
+    case SYS_SYMLINK:
+      f->eax = symlink(*((uint32_t*)f->esp+1), *((uint32_t*)f->esp+2));
       break;
     case SYS_OPEN:
       f->eax = open(*((uint32_t*)f->esp+1));
@@ -130,13 +166,79 @@ static void syscall_handler (struct intr_frame *f)
       break;
     case SYS_EXEC: {
       char *cmd_line = *((char **) f->esp + 1); // pointer to first argument
+      //printf("%s\n", cmd_line);
       f->eax = exec (cmd_line);
       break;
     }
+    case SYS_SEEK:
+      seek(*((uint32_t*)f->esp+1), *((uint32_t*)f->esp+2));
+      return;
     default:
       printf ("system call %d!\n", syscall_id);
       thread_exit ();
   }
+}
+
+static bool remove(const char *file_name)
+{
+  if (validate_user_pointer(file_name) == NULL)
+  {
+    set_exit_code (thread_current (), -1);
+    thread_exit ();
+  }
+  if (strlen(file_name) > MAX_FILE_NAME)
+  {
+    return false;
+  }
+  lock_acquire(&files_lock);
+  bool success = filesys_remove(file_name);
+  lock_release(&files_lock);
+  return success;
+}
+
+static unsigned tell(int fd)
+{
+  lock_acquire(&files_lock);
+  struct file_descriptor *file_descriptor = get_file_descriptor(fd);
+  if (file_descriptor == NULL)
+  {
+    lock_release(&files_lock);
+    return 0;
+  }
+  off_t result = file_tell(file_descriptor->file);
+  lock_release(&files_lock);
+  return result;
+}
+
+static int symlink(char *target, char *linkpath)
+{
+  if (validate_user_pointer(target) == NULL || validate_user_pointer(linkpath))
+  {
+    set_exit_code (thread_current (), -1);
+    thread_exit ();
+  }
+  if (strlen(target) > MAX_FILE_NAME || strlen(linkpath))
+  {
+    return -1;
+  }
+
+  lock_acquire(&files_lock);
+  bool success = filesys_symlink(target, linkpath);
+  lock_release(&files_lock);
+  return success ? 0 : -1;
+}
+
+static void seek(int fd, unsigned position)
+{
+  lock_acquire(&files_lock);
+  struct file_descriptor *file_descriptor = get_file_descriptor(fd);
+  if (file_descriptor == NULL)
+  {
+    lock_release(&files_lock);
+    return 0;
+  }
+  file_seek(file_descriptor->file, position);
+  lock_release(&files_lock);
 }
 
 static bool create(const char *file_name, off_t initial_size)
@@ -182,6 +284,7 @@ int write(void *stack)
     return 0;
   }
   
+  //printf("Writing to inode %p from %s\n", file_descriptor->file->inode, thread_current()->name);
   off_t bytes_written = file_write (file_descriptor->file, buffer, size);
 
   lock_release(&files_lock);
@@ -189,7 +292,7 @@ int write(void *stack)
   return bytes_written;
 }
 
-void handle_wait(void *stack)
+int handle_wait(void *stack)
 {
   tid_t tid = *((int*)stack+1);
   return process_wait(tid);
