@@ -73,9 +73,10 @@ static void kill (struct intr_frame *f)
      exceptions back to the process via signals, but we don't
      implement them. */
 
+  /* When a thread is killed by the kernel, set the exit code to -1 */
   if (thread_current ()->parent_record)
   {
-   thread_current ()->parent_record->exit_code = -1;
+    thread_current ()->parent_record->exit_code = -1;
   }
 
   /* The interrupt frame's code segment value tells us where the

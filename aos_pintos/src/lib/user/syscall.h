@@ -35,7 +35,6 @@ unsigned tell (int fd);
 void close (int fd);
 int symlink (char *target, char *linkpath);
 
-
 /* Project 4 only. */
 bool chdir (const char *dir);
 bool mkdir (const char *dir);

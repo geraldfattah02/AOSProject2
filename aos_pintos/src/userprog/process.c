@@ -36,10 +36,10 @@ tid_t process_execute (const char *file_and_args)
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
+
   strlcpy (fn_copy, file_and_args, PGSIZE);
 
   char *file_name, *unparsed_args;
-  // printf("%s\n", file_and_args);
   file_name = strtok_r (file_and_args, " ", &unparsed_args);
 
   struct child_thread *record = malloc (sizeof (struct child_thread));
@@ -50,46 +50,34 @@ tid_t process_execute (const char *file_and_args)
 
   record->loaded_successfully = false;
 
-  struct file *executable = filesys_open(file_name);
-  if (executable == NULL) {
-    return -1;
+  struct file *executable = filesys_open (file_name);
+  if (executable == NULL)
+  {
+    return TID_ERROR;
   }
-  file_close(executable);
+  file_close (executable);
 
-  tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy, record);
-  if (tid == TID_ERROR) {
-      palloc_free_page(fn_copy);
-      return TID_ERROR;
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy, record);
+  if (tid == TID_ERROR)
+  {
+    palloc_free_page (fn_copy);
+    return TID_ERROR;
   }
 
   // Wait until the child process loads
-  sema_down(&record->wait_child);
-  if (!record->loaded_successfully) {
-      return -1;
+  sema_down (&record->wait_child);
+  if (!record->loaded_successfully)
+  {
+    return TID_ERROR;
   }
 
   return tid;
-}
-
-// search for child record within the parent's child_records list
-struct child_thread *get_child_record(tid_t child_tid) {
-  struct thread *parent = thread_current();
-  struct list_elem *e;
-
-  for (e = list_begin(&parent->child_records); e != list_end(&parent->child_records); e = list_next(e)) {
-      struct child_thread *record = list_entry(e, struct child_thread, elem);
-      if (record->tid == child_tid) {
-          return record;
-      }
-  }
-  return NULL; // Child not found
 }
 
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process (void *file_and_args)
 {
-  // printf("start: %s\n", file_and_args);
   char *file_name, *unparsed_args;
   file_name = strtok_r (file_and_args, " ", &unparsed_args);
 
@@ -101,26 +89,29 @@ static void start_process (void *file_and_args)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
+  
   success = load (file_name, &if_.eip, &if_.esp, unparsed_args);
 
   if (success)
   {
-    struct file *executable = filesys_open(file_name);
+    struct file *executable = filesys_open (file_name);
     thread_current ()->executable = executable;
-    file_deny_write(executable);
-    //printf("Locked the executable %p\n", executable->inode);
+    file_deny_write (executable);
   }
 
-  // Must come after file accesses above.
-  // - sema_up will wake up the parent, which might
-  //   also try to access the file system => race condition
-  struct thread *t = thread_current();
-  if (t->parent_record) {
-    if (!success) {
+  /* Must come after file accesses above.
+    - sema_up will wake up the parent, which might also try
+    to access the file system and cause a race condition */
+
+  struct thread *t = thread_current ();
+  if (t->parent_record)
+  {
+    if (!success)
+    {
       t->parent_record->exit_code = -1;
     }
     t->parent_record->loaded_successfully = success;
-    sema_up(&t->parent_record->wait_child);
+    sema_up (&t->parent_record->wait_child);
   }
 
   /* If load failed, quit. */
@@ -147,7 +138,7 @@ static void start_process (void *file_and_args)
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-int process_wait (tid_t child_tid UNUSED)
+int process_wait (tid_t child_tid)
 {
   struct list_elem *e;
   struct child_thread *child;
@@ -159,14 +150,14 @@ int process_wait (tid_t child_tid UNUSED)
       break;
   }
 
-  if (e == list_tail(list)) // No child with this tid
+  if (e == list_tail (list)) // No child with this tid
     return -1;
 
   sema_down (&child->wait_child);
   int exit_code = child->exit_code;
-  
-  list_remove(&child->elem);
-  free(child);
+
+  list_remove (&child->elem);
+  free (child);
 
   return exit_code;
 }
@@ -312,7 +303,7 @@ bool load (const char *file_name, void (**eip) (void), void **esp, char *unparse
       ehdr.e_machine != 3 || ehdr.e_version != 1 ||
       ehdr.e_phentsize != sizeof (struct Elf32_Phdr) || ehdr.e_phnum > 1024)
     {
-      printf ("load: %s: error loading executable %p\n", file_name, file->inode);
+      printf ("load: %s: error loading executable\n", file_name);
       goto done;
     }
 
@@ -498,82 +489,85 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
   return true;
 }
 
+/* Storing data for dynamic number of arguments */
 struct argument {
-  struct list_elem elem;
-  char *value;
-  int len;
-  void *addr;
+  struct list_elem elem;  /* List elem */
+  void *addr;             /* Address of argument on the stack */
 };
 
+/* Push a string value onto the stack and add to argument list */
+static bool push_string (char **esp, struct list *args, char *value)
+{
+  struct argument *arg = malloc (sizeof (struct argument));
+  if (arg == NULL)
+  {
+    return false;
+  }
+
+  uint32_t len = strlen (value) + 1;
+
+  *esp -= len;
+  memcpy (*esp, value, len);
+  arg->addr = *esp;
+  
+  list_push_front (args, &arg->elem);
+  return true;
+}
+
+/* Push a string value onto the stack and add to argument list */
+static void push_4byte(uint32_t** esp, uint32_t value)
+{
+  *esp -= 1;
+  **esp = value;
+}
+
+/* Push arguments on the stack and setup argc, argv */
 static bool pass_arguments (char **esp, char *file_name, char *unparsed_args)
 {
   struct list args;
   list_init (&args);
 
-  // printf("file and args: %s %s\n", file_name, args);
-
-  struct argument *arg = malloc(sizeof (struct argument));
-  if (arg == NULL) {
+  bool success = push_string (esp, &args, file_name);
+  if (!success)
     return false;
-  }
-  arg->value = file_name;
-  arg->len = strlen(file_name) + 1;
-
-  *esp -= arg->len;
-  memcpy(*esp, arg->value, arg->len);
-  arg->addr = *esp;
-  
-  list_push_front (&args, &arg->elem);
 
   char *token, *save_ptr;
-  for (token = strtok_r (unparsed_args, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
+  for (token = strtok_r (unparsed_args, " ", &save_ptr);
+       token != NULL;
+       token = strtok_r (NULL, " ", &save_ptr))
   {
-    struct argument *arg = malloc(sizeof (struct argument));
-    if (arg == NULL) {
+    bool success = push_string (esp, &args, token);
+    if (!success)
       return false;
-    }
-    arg->value = token;
-    arg->len = strlen(token) + 1;
-
-    *esp -= arg->len;
-    memcpy(*esp, arg->value, arg->len);
-    arg->addr = *esp;
-    
-    list_push_front (&args, &arg->elem);
   }
 
-  // Word alignment 
+  // 4-byte word alignment 
   *esp -= ((uint32_t) *esp) % 4;
 
   // Add NULL sentinel
-  *esp -= 4;
-  *(uint32_t*) *esp = NULL;
+  push_4byte (esp, NULL);
 
   // Add arguments
   int argc = 0;
-  while (!list_empty (&args)) {
+  while (!list_empty (&args))
+  {
     struct list_elem *e = list_pop_front (&args);
     struct argument *arg = list_entry (e, struct argument, elem);
 
-    *esp -= 4;
-    *(uint32_t*) *esp = arg->addr;
+    push_4byte (esp, arg->addr);
     argc += 1;
 
-    free(arg);
+    free (arg);
   }
 
   // Add argv
-  *esp -= 4;
-  *(uint32_t*) *esp = *esp + 4;
+  push_4byte (esp, *esp);
 
   // Add argc
-  *esp -= 4;
-  *(uint32_t*) *esp = argc;
+  push_4byte (esp, argc);
 
-  // Empty return address
-  *esp -= 4;
-  *(uint32_t*) *esp = NULL;
-  //hex_dump(*esp, *esp, 64, true);
+  // Add empty return address
+  push_4byte (esp, NULL);
 
   return true;
 }
@@ -592,8 +586,7 @@ static bool setup_stack (void **esp, char *file_name, char *args)
       if (success)
       {
         *esp = PHYS_BASE;
-
-        pass_arguments(esp, file_name, args);
+        pass_arguments (esp, file_name, args);
       }
       else
         palloc_free_page (kpage);

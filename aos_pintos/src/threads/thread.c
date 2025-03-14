@@ -279,16 +279,16 @@ void thread_exit (void)
   process_exit ();
 #endif
 
-  free_thread_files (thread_current ());
+  free_thread_resources (thread_current ());
 
   struct child_thread *parent = thread_current ()->parent_record;
   if (parent != NULL)
   {
-    printf("%s: exit(%d)\n", thread_current ()->name, parent->exit_code);
+    printf ("%s: exit(%d)\n", thread_current ()->name, parent->exit_code);
     sema_up (&parent->wait_child);
   }
   else {
-    printf("%s: exit(%d)\n", thread_current ()->name, 0);
+    printf ("%s: exit(%d)\n", thread_current ()->name, 0);
   }
 
   struct child_thread *child;

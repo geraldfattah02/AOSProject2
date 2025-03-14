@@ -6,6 +6,6 @@
 
 void syscall_init (void);
 
-void free_thread_files(struct thread *);
+void free_thread_resources (struct thread *);
 
 #endif /* userprog/syscall.h */
