@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -18,6 +19,15 @@ enum thread_status
    You can redefine this to whatever type you like. */
 typedef int tid_t;
 #define TID_ERROR ((tid_t) -1) /* Error value for tid_t. */
+
+struct child_thread
+{
+   tid_t tid;
+   int exit_code;
+   struct semaphore wait_child;
+   struct list_elem elem;
+   bool loaded_successfully;  // Track successful loading
+};
 
 /* Thread priorities. */
 #define PRI_MIN 0      /* Lowest priority. */
@@ -98,6 +108,10 @@ struct thread
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
   uint32_t *pagedir; /* Page directory. */
+  struct list child_records;
+  struct child_thread *parent_record;
+  struct list file_descriptors;  
+  struct file *executable;
 #endif
 
   /* Owned by thread.c. */
@@ -116,7 +130,7 @@ void thread_tick (void);
 void thread_print_stats (void);
 
 typedef void thread_func (void *aux);
-tid_t thread_create (const char *name, int priority, thread_func *, void *);
+tid_t thread_create (const char *name, int priority, thread_func *, void *, struct child_thread *);
 
 void thread_block (void);
 void thread_unblock (struct thread *);

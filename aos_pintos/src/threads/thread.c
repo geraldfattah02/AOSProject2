@@ -11,6 +11,9 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/malloc.h"
+#include "../filesys/file.h"
+#include "userprog/syscall.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -106,7 +109,7 @@ void thread_start (void)
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
-  thread_create ("idle", PRI_MIN, idle, &idle_started);
+  thread_create ("idle", PRI_MIN, idle, &idle_started, NULL);
 
   /* Start preemptive thread scheduling. */
   intr_enable ();
@@ -159,7 +162,7 @@ void thread_print_stats (void)
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
 tid_t thread_create (const char *name, int priority, thread_func *function,
-                     void *aux)
+                     void *aux, struct child_thread *parent_record)
 {
   struct thread *t;
   struct kernel_thread_frame *kf;
@@ -177,6 +180,13 @@ tid_t thread_create (const char *name, int priority, thread_func *function,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+
+  t->parent_record = parent_record;
+  if (parent_record != NULL)
+  {
+    parent_record->tid = tid;
+    parent_record->exit_code = 0;
+  }
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -268,6 +278,28 @@ void thread_exit (void)
 #ifdef USERPROG
   process_exit ();
 #endif
+
+  free_thread_files (thread_current ());
+
+  struct child_thread *parent = thread_current ()->parent_record;
+  if (parent != NULL)
+  {
+    printf("%s: exit(%d)\n", thread_current ()->name, parent->exit_code);
+    sema_up (&parent->wait_child);
+  }
+  else {
+    printf("%s: exit(%d)\n", thread_current ()->name, 0);
+  }
+
+  struct child_thread *child;
+  struct list *list = &thread_current ()->child_records;
+  while (!list_empty (list))
+  {
+    child = list_entry (list_pop_back (list), struct child_thread, elem);
+    sema_down (&child->wait_child);
+    list_remove (&child->elem);
+    free (child);
+  }
 
   /* Remove thread from all threads list, set our status to dying,
      and schedule another process.  That process will destroy us
@@ -428,6 +460,9 @@ static void init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+  list_init (&t->child_records);
+  list_init (&t->file_descriptors);
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
