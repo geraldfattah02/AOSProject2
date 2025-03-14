@@ -20,13 +20,14 @@ enum thread_status
 typedef int tid_t;
 #define TID_ERROR ((tid_t) -1) /* Error value for tid_t. */
 
+/* Record of child thread information, stored in the parent thread */
 struct child_thread
 {
-   tid_t tid;
-   int exit_code;
-   struct semaphore wait_child;
-   struct list_elem elem;
-   bool loaded_successfully;  // Track successful loading
+   tid_t tid;                       /* Thread ID of child thread */
+   int exit_code;                   /* Stores child exit code */
+   struct semaphore wait_child;     /* Used by parent to wait for the child */
+   struct list_elem elem;           /* List element */
+   bool loaded_successfully;        /* Track if executable file loaded */
 };
 
 /* Thread priorities. */
@@ -107,11 +108,12 @@ struct thread
 
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
-  uint32_t *pagedir; /* Page directory. */
-  struct list child_records;
-  struct child_thread *parent_record;
-  struct list file_descriptors;  
-  struct file *executable;
+  uint32_t *pagedir;                   /* Page directory. */
+  struct list child_records;           /* List of child_thread records */
+  struct child_thread *parent_record;  /* Pointer to this thread's child_thread 
+                                          record, stored in the parent thread. */
+  struct list file_descriptors;        /* List of open file descriptors */
+  struct file *executable;             /* Current process executable file */
 #endif
 
   /* Owned by thread.c. */
