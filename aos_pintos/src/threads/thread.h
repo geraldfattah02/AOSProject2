@@ -23,11 +23,13 @@ typedef int tid_t;
 /* Record of child thread information, stored in the parent thread */
 struct child_thread
 {
-   tid_t tid;                       /* Thread ID of child thread */
-   int exit_code;                   /* Stores child exit code */
-   struct semaphore wait_child;     /* Used by parent to wait for the child */
-   struct list_elem elem;           /* List element */
-   bool loaded_successfully;        /* Track if executable file loaded */
+   tid_t tid;                     /* Thread ID of child thread */
+   int exit_code;                 /* Stores child exit code */
+   struct semaphore wait_child;   /* Used by parent to wait for the child */
+   struct list_elem elem;         /* List element */
+   bool loaded_successfully;      /* Track if executable file loaded */
+   bool should_free;              /* Indicates if the child should free this */
+   struct lock free_lock;         /* Lock for concurrent accesses to should_free */
 };
 
 /* Thread priorities. */

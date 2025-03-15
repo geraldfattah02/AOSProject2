@@ -45,9 +45,11 @@ tid_t process_execute (const char *file_and_args)
   struct child_thread *record = malloc (sizeof (struct child_thread));
   list_push_back (&thread_current ()->child_records, &record->elem);
   sema_init (&record->wait_child, 0);
-
+  lock_init (&record->free_lock);
+  
   /* Create a new thread to execute FILE_NAME. */
-
+  
+  record->should_free = false;
   record->loaded_successfully = false;
 
   struct file *executable = filesys_open (file_name);
@@ -514,7 +516,7 @@ static bool push_string (char **esp, struct list *args, char *value)
   return true;
 }
 
-/* Push a string value onto the stack and add to argument list */
+/* Push a 4 byte value onto the stack */
 static void push_4byte(uint32_t** esp, uint32_t value)
 {
   *esp -= 1;
