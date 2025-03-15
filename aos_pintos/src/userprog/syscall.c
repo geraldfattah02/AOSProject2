@@ -96,7 +96,6 @@ static void set_exit_code (struct thread *t, int code)
 }
 
 /* Macro for getting arguments off the stack */
-#define arg (STACK, )
 #define arg(STACK, NUM)     \
   (*((uint32_t*)STACK + NUM))
 
@@ -310,7 +309,8 @@ static int filesize (int fd)
 /* READ a file */
 static int read (int fd, void *buffer, unsigned size)
 {
-  if (validate_user_pointer (buffer) == NULL)
+  char *end = (char*)buffer + size - 1;
+  if (validate_user_pointer (buffer) == NULL || validate_user_pointer (end) == NULL)
   {
     set_exit_code (thread_current (), -1);
     thread_exit ();
@@ -318,9 +318,17 @@ static int read (int fd, void *buffer, unsigned size)
 
   if (fd == STDIN_FILENO)
   {
-    uint8_t character = input_getc();
-    *(char*)buffer = character;
-    return 1;
+    unsigned len = 0;
+    uint8_t c;
+    // Read size bytes, or until EOF (-1)
+    while (len < size && (c = input_getc()) >= 0)
+    {
+      *(uint8_t*) buffer = c;
+      len += 1;
+      *(uint8_t*) buffer += 1;
+    }
+    
+    return len;
   }
 
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
@@ -339,7 +347,8 @@ static int read (int fd, void *buffer, unsigned size)
 /* WRITE to a file */
 static int write (int fd, const void *buffer, unsigned size)
 {
-  if (validate_user_pointer (buffer) == NULL)
+  char *end = (char*)buffer + size - 1;
+  if (validate_user_pointer (buffer) == NULL || validate_user_pointer (end) == NULL)
   {
     set_exit_code (thread_current (), -1);
     thread_exit ();

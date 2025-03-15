@@ -269,6 +269,24 @@ struct thread *thread_current (void)
 /* Returns the running thread's tid. */
 tid_t thread_tid (void) { return thread_current ()->tid; }
 
+/* Check if the record has been flagged for deletion,
+   and should be freed by the remaining child/parent.
+   Otherwise, mark it for deletion. */
+static void mark_or_free_record (struct child_thread *record)
+{
+  lock_acquire (&record->free_lock);
+  if (record->should_free)
+  {
+    lock_release (&record->free_lock);
+    free (record);
+  }
+  else
+  {
+    record->should_free = true;
+    lock_release (&record->free_lock);
+  }
+}
+
 /* Deschedules the current thread and destroys it.  Never
    returns to the caller. */
 void thread_exit (void)
@@ -286,6 +304,7 @@ void thread_exit (void)
   {
     printf ("%s: exit(%d)\n", thread_current ()->name, parent->exit_code);
     sema_up (&parent->wait_child);
+    mark_or_free_record (parent);
   }
   else {
     printf ("%s: exit(%d)\n", thread_current ()->name, 0);
@@ -296,9 +315,9 @@ void thread_exit (void)
   while (!list_empty (list))
   {
     child = list_entry (list_pop_back (list), struct child_thread, elem);
-    sema_down (&child->wait_child);
     list_remove (&child->elem);
-    free (child);
+
+    mark_or_free_record (child);
   }
 
   /* Remove thread from all threads list, set our status to dying,
