@@ -107,7 +107,7 @@ void *palloc_get_multiple (enum palloc_flags flags, size_t page_cnt)
    FLAGS, in which case the kernel panics. */
 void *palloc_get_page (enum palloc_flags flags)
 {
-  return palloc_get_multiple (flags, 1);
+  return palloc_get_multiple (flags, 1); 
 }
 
 /* Frees the PAGE_CNT pages starting at PAGES. */
