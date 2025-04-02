@@ -5,8 +5,8 @@
 // 
 struct frame_entry {
     void* page_entry;
-    uint32_t last_accessed;
     struct list_elem elem;
+    struct thread * owner_thread;
 };
 
 void init_frame_table();
