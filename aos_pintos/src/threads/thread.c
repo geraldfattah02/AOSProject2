@@ -94,6 +94,7 @@ void thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -482,6 +483,7 @@ static void init_thread (struct thread *t, const char *name, int priority)
 
   list_init (&t->child_records);
   list_init (&t->file_descriptors);
+  list_init(&t->supplemental_page_table);
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

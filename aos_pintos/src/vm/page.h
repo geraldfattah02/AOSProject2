@@ -12,6 +12,8 @@ struct supplemental_page_table_entry{
 
     void* pageAdress; 
     bool isFaulted;
+    struct thread * owner;
+
 };
 
 
