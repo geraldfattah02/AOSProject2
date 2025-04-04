@@ -18,10 +18,10 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/malloc.h"
+#include "vm/page.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp, char *unparsed_args);
-
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -33,7 +33,7 @@ tid_t process_execute (const char *file_and_args)
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
-  fn_copy = allocate_frame (0);
+  fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
 
@@ -446,6 +446,7 @@ static bool validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
 
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
+   /*Edite this function to load segment to supp page table*/
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable)
@@ -464,25 +465,49 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
       /* Get a page of memory. */
-      uint8_t *kpage = allocate_frame (PAL_USER);
+      struct supplemental_page_table_entry *kpage = malloc(sizeof(struct supplemental_page_table_entry));
       if (kpage == NULL)
         return false;
 
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          palloc_free_page (kpage);
-          return false;
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
+      kpage->pageAdress = upage; //virtual page address
+      kpage->read_bytes = page_read_bytes;
+      kpage->zero_bytes = page_zero_bytes;
+      kpage->file = file;
+      kpage->offset = ofs;
+      kpage->writable = writable;
+      kpage->owner = thread_current();
+      kpage->isFaulted = false;
 
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable))
-        {
-          palloc_free_page (kpage);
-          return false;
-        }
+      if(page_read_bytes == PGSIZE){
+        //entire page is demand-paged from the file
+        kpage->type = PAGE_FILE;
+        kpage->zero_bytes = 0;
+      }
+      else if(page_read_bytes == PGSIZE){
+        //entire page is zeroed
+        kpage->type = PAGE_ZERO;
+      }
+      else{
+        //part of page is from file, part is zeroed
+        kpage->type = PAGE_FILE_ZERO;
+      }
 
+      
+      /* Commenting out bc we are implemting demand paging (implemented in page fault) */
+      // if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+      //   {
+      //      (kpage);
+      //     return false;
+      //   }
+      // memset (kpage + page_read_bytes, 0, page_zero_bytes);
+
+      // /* Add the page to the process's address space. */
+      // if (!install_page (upage, kpage, writable))
+      //   {
+      //     palloc_free_page (kpage);
+      //     return false;
+      //   }
+        
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
@@ -581,7 +606,7 @@ static bool setup_stack (void **esp, char *file_name, char *args)
   uint8_t *kpage;
   bool success = false;
 
-  kpage = allocate_frame (PAL_USER | PAL_ZERO);
+  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
   if (kpage != NULL)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);

@@ -5,6 +5,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "vm/page.c"
+#include "threads/vaddr.h" // For PGSIZE
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
@@ -151,15 +152,41 @@ static void page_fault (struct intr_frame *f)
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
 
-     if(not_present){
-
-      if(user){
-         create_page(USERPROG);
-      }else{
-         create_page(0);
+   if(not_present){
+   struct supplemental_page_table_entry *spte = get_supplemental_page_table_entry(fault_addr);
+   if(spte == NULL){
+      kill(f); //not valid fault, no spte exists
+      return;
+   }
+   uint8_t *frame = allocate_frame(PAL_USER);
+   if (frame==NULL){
+      kill(f); 
+      return;
+   }
+   if(spte->type == PAGE_FILE || spte->type == PAGE_FILE_ZERO){
+      file_seek(spte->file, spte->offset); //reading page from file
+      if(file_read(spte->file, frame, spte->read_bytes) != (int) spte->read_bytes){
+         free_frame(frame);
+         kill(f);
+         return;
       }
-      
-     }
-  
+      memset(frame + spte->read_bytes, 0, spte->zero_bytes); //zeroing the remaining bytes
+   }
+   else if(spte->type == PAGE_ZERO){
+      memset(frame, 0, PGSIZE);
+   }
+   //installing page into process's pt
+   if (!install_page(spte->pageAdress, frame, spte->writable))
+   {
+      free_frame(frame);
+      kill(f);
+      return;
+   }
+   spte->isFaulted = false;
+   }
+   else{
+   kill(f); //invalid fault?
+   }
+
 
 }

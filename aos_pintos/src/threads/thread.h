@@ -121,6 +121,7 @@ struct thread
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
   struct list supplemental_page_table;
+  struct lock supplemental_page_table_lock; /* Lock for the supplemental page table */
 };
 
 /* If false (default), use round-robin scheduler.
