@@ -8,6 +8,8 @@
 #include "../userprog/pagedir.h"
 #include "../threads/thread.h"
 #include <stdbool.h>
+#include "swap.h"
+
 typedef int off_t; // Define off_t manually as an integer type
 
 #define PAGE_FILE 0
@@ -26,6 +28,9 @@ struct supplemental_page_table_entry{
     off_t offset;
     bool writable;
     uint32_t type;
+    swap_index_t swap_index;  
+    bool is_swapped; 
 };
 
 
+bool install_page (void *upage, void *kpage, bool writable);
