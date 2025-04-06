@@ -386,7 +386,7 @@ done:
 
 /* load() helpers. */
 
-static bool install_page (void *upage, void *kpage, bool writable);
+bool install_page (void *upage, void *kpage, bool writable);
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
@@ -476,7 +476,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
       kpage->offset = ofs;
       kpage->writable = writable;
       kpage->owner = thread_current();
-      kpage->isFaulted = false;
+      kpage->isFaulted = false; //is this even needed?
 
       if(page_read_bytes == PGSIZE){
         //entire page is demand-paged from the file
@@ -630,7 +630,7 @@ static bool setup_stack (void **esp, char *file_name, char *args)
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
-static bool install_page (void *upage, void *kpage, bool writable)
+bool install_page (void *upage, void *kpage, bool writable)
 {
   struct thread *t = thread_current ();
 
