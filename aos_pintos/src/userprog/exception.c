@@ -148,36 +148,50 @@ static void page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  printf ("Page Fault occured for %p\n", fault_addr);
+  //printf ("Page Fault occured for %p\n", fault_addr);
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
 
-   if (not_present) {
+   if (not_present && is_user_vaddr (fault_addr)) {
       void *upage = pg_round_down(fault_addr);
       struct supplemental_page_table_entry *spte = get_supplemental_page_table_entry(upage);
       if(spte == NULL){
+         /*if (top_of_stack - fault_addr <= 32) {
+            add_to_stack()
+         }*/
+         //printf("Page not found\n");
          kill(f); //not valid fault, no spte exists
          return;
       }
       struct frame_entry *frame = allocate_frame(PAL_USER);
+      //printf("Allocated frame\n");
       if (frame->page_entry==NULL){
+         //printf("NULL page_entry\n");
          kill(f); 
          return;
       }
       if(!load_file(frame->page_entry, spte)){
+         //printf("Failed load file\n");
          free_frame(frame->page_entry);
          kill(f);
          return;
       }
+      //printf("File loaded\n");
 
       frame->supplemental_page_table_entry = spte;
       spte->isFaulted = true;
    }
+   else if (!is_user_vaddr (fault_addr)) {
+      // PANIC ("test");
+      //printf ("Fatal Kernel Page Fault occured for %p\n", fault_addr);
+      //printf ("Present? %d\n", !not_present);
+      kill(f);
+   }
 
    // If still here, print debug message
-   printf ("Fatal Page Fault occured for %p\n", fault_addr);
-   printf ("Present? %d\n", !not_present);
-   kill(f);
+   /*//printf ("Fatal Page Fault occured for %p\n", fault_addr);
+   //printf ("Present? %d\n", !not_present);
+   kill(f);*/
 }

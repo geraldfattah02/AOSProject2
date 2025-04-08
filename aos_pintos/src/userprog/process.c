@@ -455,7 +455,6 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
-  file_seek (file, ofs);
   while (read_bytes > 0 || zero_bytes > 0)
     {
       /* Calculate how to fill this page.
@@ -492,27 +491,18 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
         kpage->type = PAGE_FILE_ZERO;
       }
 
-      
-      /* Commenting out bc we are implemting demand paging (implemented in page fault) */
-      // if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-      //   {
-      //      (kpage);
-      //     return false;
-      //   }
-      // memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      // /* Add the page to the process's address space. */
-      // if (!install_page (upage, kpage, writable))
-      //   {
-      //     palloc_free_page (kpage);
-      //     return false;
-      //   }
+      struct thread *current = thread_current ();
+      lock_acquire(&current->supplemental_page_table_lock);
+      list_push_back(&current->supplemental_page_table, &kpage->elem);
+      lock_release(&current->supplemental_page_table_lock);
         
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      ofs += PGSIZE;
     }
+  file_seek (file, ofs);
   return true;
 }
 
@@ -603,20 +593,41 @@ static bool pass_arguments (char **esp, char *file_name, char *unparsed_args)
    user virtual memory. */
 static bool setup_stack (void **esp, char *file_name, char *args)
 {
-  uint8_t *kpage;
   bool success = false;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL)
+  struct frame_entry* frame_entry = allocate_frame (PAL_USER | PAL_ZERO);
+
+  struct supplemental_page_table_entry *pte = malloc(sizeof(struct supplemental_page_table_entry));
+  if (pte == NULL)
+    return false;
+
+  pte->pageAdress = frame_entry->page_entry; //virtual page address
+  pte->read_bytes = 0;
+  pte->zero_bytes = 0;
+  pte->file = NULL;
+  pte->offset = 0;
+  pte->writable = true;
+  pte->owner = thread_current();
+  pte->isFaulted = false; //is this even needed?
+
+  pte->type = PAGE_STACK;
+
+  struct thread *current = thread_current ();
+  lock_acquire(&current->supplemental_page_table_lock);
+  list_push_back(&current->supplemental_page_table, &pte->elem);
+  lock_release(&current->supplemental_page_table_lock);
+
+  if (pte != NULL)
     {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+      //printf("Installing stack at %p, virtual %p\n", ((uint8_t *) PHYS_BASE) - PGSIZE, frame_entry->page_entry);
+      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, frame_entry->page_entry, true);
       if (success)
       {
         *esp = PHYS_BASE;
         pass_arguments (esp, file_name, args);
       }
       else
-        palloc_free_page (kpage);
+        free_frame(frame_entry);
     }
   return success;
 }

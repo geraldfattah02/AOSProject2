@@ -15,6 +15,7 @@ typedef int off_t; // Define off_t manually as an integer type
 #define PAGE_FILE 0
 #define PAGE_ZERO 1
 #define PAGE_FILE_ZERO 2
+#define PAGE_STACK 3
 
 struct supplemental_page_table_entry{
     struct list_elem elem;
