@@ -11,7 +11,7 @@
 #include "swap.h"
 
 typedef int off_t; // Define off_t manually as an integer type
-
+#define MAX_STACK_SIZE (1 << 23) // 8MB stack size limit
 #define PAGE_FILE 0
 #define PAGE_ZERO 1
 #define PAGE_FILE_ZERO 2

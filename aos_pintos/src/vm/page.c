@@ -75,3 +75,54 @@ void clear_supplemental_page_entries (struct list *page_table_entries)
       free (f);
     }
 }
+
+bool
+grow_stack(void *virtual_page) 
+{
+  // Round down to page boundary
+  virtual_page = pg_round_down(virtual_page);
+  
+  // Check if we're exceeding the max stack size
+  if ((size_t)(PHYS_BASE - virtual_page) > MAX_STACK_SIZE) {
+    return false;
+  }
+
+  // Allocate a frame for the new stack page
+  struct frame_entry* frame_entry = allocate_frame(PAL_USER | PAL_ZERO);
+  if (frame_entry == NULL)
+    return false;
+
+  // Create supplemental page table entry
+  struct supplemental_page_table_entry *pte = malloc(sizeof(struct supplemental_page_table_entry));
+  if (pte == NULL) {
+    // Need to free the frame that was allocated
+    free_frame(frame_entry);
+    return false;
+  }
+
+  // Setup the supplemental page table entry
+  pte->pageAdress = virtual_page;             // The virtual address for this page
+  pte->read_bytes = 0;
+  pte->zero_bytes = 0;
+  pte->file = NULL;
+  pte->offset = 0;
+  pte->writable = true;
+  pte->owner = thread_current();
+  pte->isFaulted = false;
+  pte->type = PAGE_STACK;
+
+  // Map the physical frame to the virtual page
+  if (!install_page(virtual_page, frame_entry->page_entry, true)) {
+    free(pte);
+    free_frame(frame_entry);
+    return false;
+  }
+
+  // Add the page to the process's supplemental page table
+  struct thread *current = thread_current();
+  lock_acquire(&current->supplemental_page_table_lock);
+  list_push_back(&current->supplemental_page_table, &pte->elem);
+  lock_release(&current->supplemental_page_table_lock);
+
+  return true;
+}

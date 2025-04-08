@@ -183,6 +183,16 @@ static void page_fault (struct intr_frame *f)
       frame->supplemental_page_table_entry = spte;
       spte->isFaulted = true;
    }
+
+   //INSIDE THIS ELSE WE NEED TO CHECK IF WE NEED TO GROW THE STACK AND IF SO 
+   //GROW THE STACK BY ONE PAGE USING THE FUNCTION
+   // else{
+   //    if(accessingStack){
+   //       if(!grow_stack(fault_addr)){
+   //          kill(f);
+   //       }
+   //    }
+   // }
    else if (!is_user_vaddr (fault_addr)) {
       // PANIC ("test");
       //printf ("Fatal Kernel Page Fault occured for %p\n", fault_addr);

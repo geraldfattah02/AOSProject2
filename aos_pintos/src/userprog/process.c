@@ -591,45 +591,22 @@ static bool pass_arguments (char **esp, char *file_name, char *unparsed_args)
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
-static bool setup_stack (void **esp, char *file_name, char *args)
+static bool setup_stack(void **esp, char *file_name, char *args)
 {
-  bool success = false;
-
-  struct frame_entry* frame_entry = allocate_frame (PAL_USER | PAL_ZERO);
-
-  struct supplemental_page_table_entry *pte = malloc(sizeof(struct supplemental_page_table_entry));
-  if (pte == NULL)
+  // Calculate the address for the stack page (one page below PHYS_BASE)
+  void *stack_page = ((uint8_t *)PHYS_BASE) - PGSIZE;
+  
+  // Call the grow_stack_one_page function to allocate and map the page
+  if (!grow_stack_one_page(stack_page))
     return false;
 
-  pte->pageAdress = frame_entry->page_entry; //virtual page address
-  pte->read_bytes = 0;
-  pte->zero_bytes = 0;
-  pte->file = NULL;
-  pte->offset = 0;
-  pte->writable = true;
-  pte->owner = thread_current();
-  pte->isFaulted = false; //is this even needed?
-
-  pte->type = PAGE_STACK;
-
-  struct thread *current = thread_current ();
-  lock_acquire(&current->supplemental_page_table_lock);
-  list_push_back(&current->supplemental_page_table, &pte->elem);
-  lock_release(&current->supplemental_page_table_lock);
-
-  if (pte != NULL)
-    {
-      //printf("Installing stack at %p, virtual %p\n", ((uint8_t *) PHYS_BASE) - PGSIZE, frame_entry->page_entry);
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, frame_entry->page_entry, true);
-      if (success)
-      {
-        *esp = PHYS_BASE;
-        pass_arguments (esp, file_name, args);
-      }
-      else
-        free_frame(frame_entry);
-    }
-  return success;
+  // Set initial stack pointer to the top of user memory
+  *esp = PHYS_BASE;
+  
+  // Now load arguments onto the stack
+  pass_arguments(esp, file_name, args);
+  
+  return true;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
