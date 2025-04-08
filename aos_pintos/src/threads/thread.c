@@ -484,7 +484,6 @@ static void init_thread (struct thread *t, const char *name, int priority)
   list_init (&t->child_records);
   list_init (&t->file_descriptors);
   list_init(&t->supplemental_page_table);
-  swap_init();
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

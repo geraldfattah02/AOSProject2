@@ -84,6 +84,7 @@ int main (void)
   argv = parse_options (argv);
 
   init_frame_table ();
+  swap_init();
 
   /* Initialize ourselves as a thread so we can use locks,
      then enable console locking. */

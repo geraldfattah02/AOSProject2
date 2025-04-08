@@ -16,8 +16,8 @@ get_supplemental_page_table_entry (void *virtualAddress)
       &current_thread->supplemental_page_table;
 
   struct list_elem *e;
-  for (e = list_begin (&supplemental_page_table);
-       e != list_end (&supplemental_page_table); e = list_next (e))
+  for (e = list_begin (supplemental_page_table);
+       e != list_end (supplemental_page_table); e = list_next (e))
     {
       struct supplemental_page_table_entry *f =
           list_entry (e, struct supplemental_page_table_entry, elem);
