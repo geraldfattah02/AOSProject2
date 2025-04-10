@@ -76,14 +76,13 @@ void clear_supplemental_page_entries (struct list *page_table_entries)
     }
 }
 
-bool
-grow_stack(void *virtual_page) 
+bool grow_stack(void *virtual_page) 
 {
   // Round down to page boundary
   virtual_page = pg_round_down(virtual_page);
   
   // Check if we're exceeding the max stack size
-  if ((size_t)(PHYS_BASE - virtual_page) > MAX_STACK_SIZE) {
+  if ((size_t)((uintptr_t)PHYS_BASE - (uintptr_t)virtual_page) > MAX_STACK_SIZE) {
     return false;
   }
 
@@ -99,6 +98,7 @@ grow_stack(void *virtual_page)
     free_frame(frame_entry);
     return false;
   }
+
 
   // Setup the supplemental page table entry
   pte->pageAdress = virtual_page;             // The virtual address for this page

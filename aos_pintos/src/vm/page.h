@@ -35,3 +35,4 @@ struct supplemental_page_table_entry{
 
 
 bool install_page (void *upage, void *kpage, bool writable);
+bool grow_stack(void *virtual_page);

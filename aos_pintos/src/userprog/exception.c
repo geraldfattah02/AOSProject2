@@ -147,17 +147,29 @@ static void page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+  
+  bool accessingStack = false;
 
+  //Check if the faulting address is accessing the stack
+  if ((uintptr_t)fault_addr >= (uintptr_t)f->esp - 32 && (uintptr_t)fault_addr < (uintptr_t)PHYS_BASE) {
+     accessingStack = true;
+  }
   //printf ("Page Fault occured for %p\n", fault_addr);
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
-
-   if (not_present && is_user_vaddr (fault_addr)) {
+   
+   if (not_present && is_user_vaddr (fault_addr) && user) {
       void *upage = pg_round_down(fault_addr);
       struct supplemental_page_table_entry *spte = get_supplemental_page_table_entry(upage);
       if(spte == NULL){
+         if(accessingStack){
+            if(!grow_stack(upage)){
+               kill(f);
+            }
+            return;
+         }
          /*if (top_of_stack - fault_addr <= 32) {
             add_to_stack()
          }*/
@@ -167,7 +179,7 @@ static void page_fault (struct intr_frame *f)
       }
       struct frame_entry *frame = allocate_frame(PAL_USER);
       //printf("Allocated frame\n");
-      if (frame->page_entry==NULL){
+      if (frame->page_entry==NULL || frame==NULL){
          //printf("NULL page_entry\n");
          kill(f); 
          return;
@@ -183,25 +195,11 @@ static void page_fault (struct intr_frame *f)
       frame->supplemental_page_table_entry = spte;
       spte->isFaulted = true;
    }
-
-   //INSIDE THIS ELSE WE NEED TO CHECK IF WE NEED TO GROW THE STACK AND IF SO 
-   //GROW THE STACK BY ONE PAGE USING THE FUNCTION
-   // else{
-   //    if(accessingStack){
-   //       if(!grow_stack(fault_addr)){
-   //          kill(f);
-   //       }
-   //    }
-   // }
-   else if (!is_user_vaddr (fault_addr)) {
+   else if (!is_user_vaddr (fault_addr) || !not_present) {
       // PANIC ("test");
       //printf ("Fatal Kernel Page Fault occured for %p\n", fault_addr);
       //printf ("Present? %d\n", !not_present);
       kill(f);
+      return;
    }
-
-   // If still here, print debug message
-   /*//printf ("Fatal Page Fault occured for %p\n", fault_addr);
-   //printf ("Present? %d\n", !not_present);
-   kill(f);*/
 }

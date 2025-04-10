@@ -597,7 +597,7 @@ static bool setup_stack(void **esp, char *file_name, char *args)
   void *stack_page = ((uint8_t *)PHYS_BASE) - PGSIZE;
   
   // Call the grow_stack_one_page function to allocate and map the page
-  if (!grow_stack_one_page(stack_page))
+  if (!grow_stack(stack_page))
     return false;
 
   // Set initial stack pointer to the top of user memory
