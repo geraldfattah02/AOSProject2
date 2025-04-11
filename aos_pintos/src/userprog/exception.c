@@ -1,6 +1,7 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdint.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -109,6 +110,11 @@ static void kill (struct intr_frame *f)
     }
 }
 
+bool stack_heuristic (uintptr_t addr, uintptr_t esp)
+{
+   return addr >= esp - 32 && addr < (uintptr_t)PHYS_BASE;
+}
+
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
@@ -151,16 +157,20 @@ static void page_fault (struct intr_frame *f)
   bool accessingStack = false;
 
   //Check if the faulting address is accessing the stack
-  if ((uintptr_t)fault_addr >= (uintptr_t)f->esp - 32 && (uintptr_t)fault_addr < (uintptr_t)PHYS_BASE) {
+  if (stack_heuristic(fault_addr, f->esp)) {
      accessingStack = true;
   }
   //printf ("Page Fault occured for %p\n", fault_addr);
+  //printf("Not present? %d\n", not_present);
+  //printf("User? %d\n", user);
+  //printf("User Addr? %d\n", is_user_vaddr (fault_addr));
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
    
-   if (not_present && is_user_vaddr (fault_addr) && user) {
+   if (not_present && is_user_vaddr (fault_addr)) {
+      //printf("Here 1\n");
       void *upage = pg_round_down(fault_addr);
       struct supplemental_page_table_entry *spte = get_supplemental_page_table_entry(upage);
       if(spte == NULL){
@@ -202,4 +212,5 @@ static void page_fault (struct intr_frame *f)
       kill(f);
       return;
    }
+   //printf("Here 2\n");
 }

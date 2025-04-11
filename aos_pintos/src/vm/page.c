@@ -78,6 +78,8 @@ void clear_supplemental_page_entries (struct list *page_table_entries)
 
 bool grow_stack(void *virtual_page) 
 {
+  ASSERT (is_user_vaddr (virtual_page));
+
   // Round down to page boundary
   virtual_page = pg_round_down(virtual_page);
   

@@ -12,6 +12,8 @@
 #include "filesys/file.h"
 #include "process.h"
 #include <stdlib.h>
+#include "vm/page.h"
+#include "userprog/exception.h"
 
 #define MAX_FILE_NAME 14
 
@@ -52,7 +54,7 @@ static bool create (const char *file, unsigned initial_size);
 static bool remove (const char *file);
 static int open (const char *file);
 static int filesize (int fd);
-static int read (int fd, void *buffer, unsigned size);
+static int read (int fd, void *buffer, unsigned size, uintptr_t esp);
 static int write (int fd, const void *buffer, unsigned size);
 static void seek (int fd, unsigned position);
 static unsigned tell (int fd);
@@ -68,16 +70,33 @@ void syscall_init (void)
   lock_init (&filesys_lock);
 }
 
+static bool is_valid (void *user_ptr)
+{
+  if (user_ptr == NULL || is_kernel_vaddr (user_ptr)) {   
+    return false;
+  }
+  return true;
+}
+
 /* Check if user pointer is valid */
 static void *validate_user_pointer (void *user_ptr)
 {
-  if (user_ptr == NULL)           // Pointer is NULL
+  if (user_ptr == NULL) {          // Pointer is NULL
+    return NULL;
+  }
+  if (is_kernel_vaddr (user_ptr)) { // Pointer to kernel virtual address space
+    //printf("Kernel addr\n");
     return NULL; 
-  if (is_kernel_vaddr (user_ptr)) // Pointer to kernel virtual address space
-    return NULL; 
+  }
 
   struct thread *t = thread_current ();
-  return pagedir_get_page (t->pagedir, user_ptr); // Return kernel virtual address, or NULL if unmapped
+  void *kaddr = pagedir_get_page (t->pagedir, user_ptr); // Return kernel virtual address, or NULL if unmapped
+
+  if (kaddr == NULL) {
+    //printf("Bad mapping\n");
+  }
+
+  return kaddr;
 }
 
 /* Check if system call goes across a bad memory boundary */
@@ -137,7 +156,7 @@ static void syscall_handler (struct intr_frame *f)
       f->eax = filesize(arg (f->esp, 1));
   		return;
     case SYS_READ:
-      f->eax = read(arg (f->esp, 1), arg (f->esp, 2), arg (f->esp, 3));
+      f->eax = read(arg (f->esp, 1), arg (f->esp, 2), arg (f->esp, 3), f->esp);
       return;
     case SYS_WRITE:
       f->eax = write(arg (f->esp, 1), arg (f->esp, 2), arg (f->esp, 3));
@@ -155,7 +174,7 @@ static void syscall_handler (struct intr_frame *f)
       f->eax = symlink(arg (f->esp, 1), arg (f->esp, 2));
       return;
     default:
-      printf ("system call %d not implemented\n", syscall_id);
+      //printf ("system call %d not implemented\n", syscall_id);
       thread_exit ();
   }
 }
@@ -307,14 +326,62 @@ static int filesize (int fd)
 }
 
 /* READ a file */
-static int read (int fd, void *buffer, unsigned size)
+static int read (int fd, void *buffer, unsigned size, uintptr_t esp)
 {
   char *end = (char*)buffer + size - 1;
-  if (validate_user_pointer (buffer) == NULL || validate_user_pointer (end) == NULL)
+  unsigned page_size_remaining = (unsigned) (((char*) pg_round_down(buffer) + PGSIZE) - (char*) buffer);
+  //printf("read buffer %p\n", buffer);
+  //printf("valid? %p\n", is_valid (buffer));
+  //printf("buffer page ptr %p\n", pg_round_down(buffer));
+  //printf("end buffer %p\n", end);
+  //printf("valid? %p\n", validate_user_pointer (end));
+  if (!is_valid (buffer) || is_kernel_vaddr (end))
   {
+    //printf("Bad buffer\n");
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
+  
+  struct thread *t = thread_current ();
+  void *kaddr = pagedir_get_page (t->pagedir, buffer); // Return kernel virtual address, or NULL if unmapped
+  //printf("kaddr %p\n", kaddr);
+  //printf("Stack? %d\n", stack_heuristic(buffer, esp));
+  if (kaddr == NULL && stack_heuristic(buffer, esp)) {
+    if(!grow_stack(pg_round_down(buffer))){
+      //printf("Bad buffer\n");
+      set_exit_code (thread_current (), -1);
+      thread_exit ();
+    }
+  } else if (kaddr == NULL) {
+    set_exit_code (thread_current (), -1);
+    thread_exit ();
+  }
+  
+  struct supplemental_page_table_entry *entry = get_supplemental_page_table_entry(pg_round_down(buffer));
+  //printf("Entry %p\n", entry);
+  if (!entry->writable) {
+    //printf("Not writeable\n");
+    set_exit_code (thread_current (), -1);
+    thread_exit ();
+  }
+
+  //printf("Valid read buffer\n");
+
+  char *start = buffer;
+  while (pg_round_down(start) < pg_round_down(end))
+  {
+    //printf("end %p, start %p\n", end, start);
+    start += PGSIZE;
+    void *upage = pg_round_down(start);
+    //printf("creating page at %p\n", upage);
+    struct supplemental_page_table_entry *spte = get_supplemental_page_table_entry(upage); 
+    if (spte == NULL) {
+      //printf("Growing stack %p\n", upage);
+      grow_stack (upage);
+    }
+  }
+
+  //printf("Done growing\n");
 
   if (fd == STDIN_FILENO)
   {
@@ -337,11 +404,36 @@ static int read (int fd, void *buffer, unsigned size)
     return -1;
   }
   
+  //printf("Locked\n");
   lock_acquire (&filesys_lock);
-  off_t bytes_read = file_read (file_descriptor->file, buffer, size);
-  lock_release (&filesys_lock);
+  //printf("Reading %d\n", size);
+  off_t total_bytes_read = 0;
+  if (size <= page_size_remaining) {
+    total_bytes_read = file_read (file_descriptor->file, buffer, size);
+  } else {
+    bool done = false;
+    while (!done) {
+      //printf("Reading size %d\n", page_size_remaining);
+      //printf("start %p\n", buffer);
 
-  return bytes_read;
+      // ((int*)buffer)[0] = 1;
+      //printf("wrote\n");
+      off_t bytes_read = file_read (file_descriptor->file, buffer, page_size_remaining);
+      total_bytes_read += bytes_read;
+      //printf("read %d bytes\n", bytes_read);
+      size -= bytes_read;
+      if (bytes_read != page_size_remaining || size <= 0) {
+        done = true;
+        break;
+      }
+      buffer = (char*) buffer + bytes_read;
+      page_size_remaining = size <= PGSIZE ? size : PGSIZE;
+    }
+  }
+  lock_release (&filesys_lock);
+  //printf("Released\n");
+
+  return total_bytes_read;
 }
 
 /* WRITE to a file */

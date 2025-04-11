@@ -493,6 +493,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
       struct thread *current = thread_current ();
       lock_acquire(&current->supplemental_page_table_lock);
+      //printf("Creating page %p\n", kpage->pageAdress);
       list_push_back(&current->supplemental_page_table, &kpage->elem);
       lock_release(&current->supplemental_page_table_lock);
         
