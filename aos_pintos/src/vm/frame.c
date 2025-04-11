@@ -32,7 +32,7 @@ void* allocate_frame(enum palloc_flags flags) {
     else { // Add to frame table
 
         frame->page_entry = page;
-        frame->owner_thread = thread_current;
+        frame->owner_thread = thread_current();
         frame->pinned = false;
 
         lock_acquire (&frame_table_lock);
@@ -51,33 +51,48 @@ void * evict_page() {
     
     if (eviction_pointer == NULL || eviction_pointer == list_end(&frame_table)) {
         eviction_pointer = list_begin(&frame_table);
+        struct frame_entry *f = list_entry(eviction_pointer, struct frame_entry, elem);
+        victim = f;
     }
     // Iterate using the eviction pointer
-    while (victim != NULL) {
-        if(victim->pinned){ //entry cannot be evicted bc its being used by kernel 
-            continue;
-        }
-
+    while (true) {
         if (eviction_pointer == list_end(&frame_table)) {
             eviction_pointer = list_begin(&frame_table);
         }
-        
-        struct frame_entry *f = list_entry(eviction_pointer, struct frame_entry, elem);
-        
-        if (!pagedir_is_accessed(f->owner_thread->pagedir, f->page_entry)) {
-            victim = f;
-        } else {
-            pagedir_set_accessed(f->owner_thread->pagedir, f->page_entry, false);
-        }
-        
-        eviction_pointer = list_next(eviction_pointer);
-    }
-    // Remove victim frame from table and free it
 
+        struct frame_entry *f = list_entry(eviction_pointer, struct frame_entry, elem);
+        eviction_pointer = list_next(eviction_pointer);  // advance for next iteration
+
+        if (f->pinned) continue;
+
+        struct supplemental_page_table_entry *spte = fte_to_spte(f);
+        // printf("Page Entry: %p\n",f->page_entry);
+        printf("Page Directory: %p\n",f->owner_thread->pagedir);
+        printf("Spte page adress: %p\n",spte->pageAdress);
+        if(spte != NULL){
+            
+            if (!pagedir_is_accessed(f->owner_thread->pagedir, spte->pageAdress)) {
+                victim = f;
+                printf("Not Accessed\n");
+                break;
+            } else {
+                pagedir_set_accessed(f->owner_thread->pagedir, spte->pageAdress, false);
+                printf("Setting Access to Zero\n");
+            }
+        }else{
+            continue;
+        }
+    }
+    
+    // Remove victim frame from table and free it
+    struct supplemental_page_table_entry *spte = fte_to_spte(victim);
+    printf("Checking dirty bit\n");
     // Check if the page is dirty and swap it out if necessary
-    if (pagedir_is_dirty(victim->owner_thread->pagedir, victim->page_entry)) {
+    if (pagedir_is_dirty(victim->owner_thread->pagedir, spte->pageAdress)) {
+        printf("Is dirty\n");
         // Swap out the page
         swap_index_t swap_index = swap_out(victim->page_entry);
+        printf("Swapped out\n");
         if (swap_index != -1) {
             //update the supplemental page table entry
             victim->supplemental_page_table_entry->swap_index = swap_index;
@@ -85,10 +100,9 @@ void * evict_page() {
             victim->supplemental_page_table_entry->isFaulted = false; 
         }
     }
+    lock_release(&frame_table_lock);
 
     free_frame(victim->page_entry);
-
-    lock_release(&frame_table_lock);
 }
 
 void free_frame(void* page) {

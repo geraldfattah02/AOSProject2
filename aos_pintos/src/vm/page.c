@@ -8,6 +8,7 @@ delete page table entry from memory
 #include "vm/page.h"
 #include "threads/vaddr.h"
 #include <string.h>
+
 struct supplemental_page_table_entry *
 get_supplemental_page_table_entry (void *virtualAddress)
 {
@@ -24,6 +25,29 @@ get_supplemental_page_table_entry (void *virtualAddress)
       if (f->pageAdress == virtualAddress)
         {
           return f;
+        }
+    }
+  return NULL;
+}
+struct supplemental_page_table_entry *
+fte_to_spte (struct frame_entry* fte)
+{
+  struct thread *current_thread = thread_current ();
+  struct list *supplemental_page_table =
+      &current_thread->supplemental_page_table;
+
+  struct list_elem *e;
+  for (e = list_begin (supplemental_page_table);
+       e != list_end (supplemental_page_table); e = list_next (e))
+    {
+      struct supplemental_page_table_entry *spte = list_entry (e, struct supplemental_page_table_entry, elem);
+
+      uint32_t * physicalPage = pagedir_get_page(current_thread->pagedir, spte->pageAdress);
+      //printf("SPTE page: %p | FTE page_entry: %p\n", physicalPage, fte->page_entry);
+
+      if (physicalPage == fte->page_entry)
+        {
+          return spte;
         }
     }
   return NULL;
