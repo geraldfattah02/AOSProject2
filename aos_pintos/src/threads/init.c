@@ -84,7 +84,6 @@ int main (void)
   argv = parse_options (argv);
 
   init_frame_table ();
-  swap_init();
 
   /* Initialize ourselves as a thread so we can use locks,
      then enable console locking. */
@@ -127,6 +126,8 @@ int main (void)
   locate_block_devices ();
   filesys_init (format_filesys);
 #endif
+
+  swap_init();
 
   printf ("Boot complete.\n");
 

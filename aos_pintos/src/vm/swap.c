@@ -71,6 +71,8 @@ swap_out(void *frame)
                  swap_index * PAGE_SECTORS + i,
                  (uint8_t *)frame + i * BLOCK_SECTOR_SIZE);
     }
+
+  //printf("Swapping out %p to %d\n", frame, swap_index);
   
   lock_release(&swap_lock);
   
@@ -82,6 +84,8 @@ bool
 swap_in(swap_index_t swap_index, void *frame)
 {
   ASSERT(frame != NULL);
+
+  //printf("Swapping in %d to %p\n", swap_index, frame);
   
   /* Acquire the swap lock */
   lock_acquire(&swap_lock);
@@ -89,6 +93,7 @@ swap_in(swap_index_t swap_index, void *frame)
   /* Verify the swap slot is in use */
   if (!bitmap_test(swap_map, swap_index))
     {
+      PANIC ("Slot not in use");
       lock_release(&swap_lock);
       return false;
     }

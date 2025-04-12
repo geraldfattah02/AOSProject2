@@ -144,34 +144,34 @@ static void syscall_handler (struct intr_frame *f)
       f->eax = wait (arg (f->esp, 1));
       return;
     case SYS_CREATE:
-      f->eax = create(arg (f->esp, 1), arg (f->esp, 2));
+      f->eax = create (arg (f->esp, 1), arg (f->esp, 2));
       return;
     case SYS_REMOVE:
-      f->eax = remove(arg (f->esp, 1));
+      f->eax = remove (arg (f->esp, 1));
       return;
     case SYS_OPEN:
-      f->eax = open(arg (f->esp, 1));
+      f->eax = open (arg (f->esp, 1));
       return;
     case SYS_FILESIZE:
-      f->eax = filesize(arg (f->esp, 1));
+      f->eax = filesize (arg (f->esp, 1));
   		return;
     case SYS_READ:
-      f->eax = read(arg (f->esp, 1), arg (f->esp, 2), arg (f->esp, 3), f->esp);
+      f->eax = read (arg (f->esp, 1), arg (f->esp, 2), arg (f->esp, 3), f->esp);
       return;
     case SYS_WRITE:
-      f->eax = write(arg (f->esp, 1), arg (f->esp, 2), arg (f->esp, 3));
+      f->eax = write (arg (f->esp, 1), arg (f->esp, 2), arg (f->esp, 3));
       return;
     case SYS_SEEK:
-      seek(arg (f->esp, 1), arg (f->esp, 2));
+      seek (arg (f->esp, 1), arg (f->esp, 2));
       return;
     case SYS_TELL:
-      f->eax = tell(arg (f->esp, 1));
+      f->eax = tell (arg (f->esp, 1));
       return;
     case SYS_CLOSE:
-      close(arg (f->esp, 1));
+      close (arg (f->esp, 1));
       return;
     case SYS_SYMLINK:
-      f->eax = symlink(arg (f->esp, 1), arg (f->esp, 2));
+      f->eax = symlink (arg (f->esp, 1), arg (f->esp, 2));
       return;
     default:
       //printf ("system call %d not implemented\n", syscall_id);
@@ -267,14 +267,18 @@ static bool remove (const char *file)
 /* OPEN a file */
 static int open (const char *file_name)
 {
+  DPRINT("Invalid user ptr? %s\n", file_name);
   if (validate_user_pointer (file_name) == NULL)
   {
+    DPRINT("Invalid user ptr\n");
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
 
+  DPRINT("Big FIle name?\n");
   if (strlen (file_name) > MAX_FILE_NAME)
   {
+    DPRINT("Big FIle name\n");
     return -1;
   }
 
@@ -282,8 +286,10 @@ static int open (const char *file_name)
   struct file *file = filesys_open (file_name);
   lock_release (&filesys_lock);
 
+  DPRINT("File DNE?\n");
   if (file == NULL)
   {
+    DPRINT("File DNE %s\n", file_name);
     return -1;
   }
 
@@ -330,42 +336,65 @@ static int read (int fd, void *buffer, unsigned size, uintptr_t esp)
 {
   char *end = (char*)buffer + size - 1;
   unsigned page_size_remaining = (unsigned) (((char*) pg_round_down(buffer) + PGSIZE) - (char*) buffer);
-  //printf("read buffer %p\n", buffer);
-  //printf("valid? %p\n", is_valid (buffer));
-  //printf("buffer page ptr %p\n", pg_round_down(buffer));
-  //printf("end buffer %p\n", end);
-  //printf("valid? %p\n", validate_user_pointer (end));
+  DPRINT("read buffer %p\n", buffer);
+  DPRINT("valid? %p\n", is_valid (buffer));
+  DPRINT("buffer page ptr %p\n", pg_round_down(buffer));
+  DPRINT("end buffer %p\n", end);
+  DPRINT("valid? %p\n", validate_user_pointer (end));
   if (!is_valid (buffer) || is_kernel_vaddr (end))
   {
-    //printf("Bad buffer\n");
+    DPRINT("Bad buffer\n");
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
   
   struct thread *t = thread_current ();
   void *kaddr = pagedir_get_page (t->pagedir, buffer); // Return kernel virtual address, or NULL if unmapped
-  //printf("kaddr %p\n", kaddr);
-  //printf("Stack? %d\n", stack_heuristic(buffer, esp));
-  if (kaddr == NULL && stack_heuristic(buffer, esp)) {
+  DPRINT("kaddr %p\n", kaddr);
+  DPRINT("Stack? %d\n", stack_heuristic(buffer, esp));
+  bool is_stack = stack_heuristic(buffer, esp);
+  if (kaddr == NULL && is_stack) {
     if(!grow_stack(pg_round_down(buffer))){
-      //printf("Bad buffer\n");
+      DPRINT("Bad buffer2\n");
       set_exit_code (thread_current (), -1);
       thread_exit ();
     }
-  } else if (kaddr == NULL) {
-    set_exit_code (thread_current (), -1);
-    thread_exit ();
+    kaddr = pagedir_get_page (t->pagedir, buffer);
+    ASSERT (kaddr != NULL);
   }
   
   struct supplemental_page_table_entry *entry = get_supplemental_page_table_entry(pg_round_down(buffer));
+
+  if (entry == NULL) {
+    DPRINT ("Doesn't exist in spt\n");
+    set_exit_code (thread_current (), -1);
+    thread_exit ();
+  } else if (kaddr == NULL) { // Page exists, but not loaded. Load it.
+    struct frame_entry *frame = allocate_frame(PAL_USER);
+    DPRINT ("Allocated frame\n");
+    if (frame->page_entry==NULL || frame==NULL){
+      DPRINT ("NULL page_entry\n");
+      set_exit_code (thread_current (), -1);
+      thread_exit ();
+    }
+    if(!load_file(frame->page_entry, entry)){
+      printf("Failed load file\n");
+      free_frame(frame->page_entry, true);
+      set_exit_code (thread_current (), -1);
+      thread_exit ();
+    }
+    DPRINT ("Loaded entry into %p\n", frame->page_entry);
+    kaddr = frame->page_entry;
+  }
+
   //printf("Entry %p\n", entry);
   if (!entry->writable) {
-    //printf("Not writeable\n");
+    DPRINT ("Not writeable\n");
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
 
-  //printf("Valid read buffer\n");
+  DPRINT ("Valid read buffer\n");
 
   char *start = buffer;
   while (pg_round_down(start) < pg_round_down(end))

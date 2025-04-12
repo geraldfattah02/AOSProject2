@@ -1,6 +1,12 @@
 #ifndef __LIB_DEBUG_H
 #define __LIB_DEBUG_H
 
+#ifdef DEBUG
+#define DPRINT( ... ) printf(__VA_ARGS__)
+#else
+#define DPRINT( ... ) ((void) 0)
+#endif
+
 /* GCC lets us add "attributes" to functions, function
    parameters, etc. to indicate their properties.
    See the GCC manual for details. */

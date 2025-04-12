@@ -160,7 +160,8 @@ static void page_fault (struct intr_frame *f)
   if (stack_heuristic(fault_addr, f->esp)) {
      accessingStack = true;
   }
-  //printf ("Page Fault occured for %p\n", fault_addr);
+  DPRINT ("Page Fault occured for %p\n", fault_addr);
+  // ASSERT (fault_addr != 0);
   //printf("Not present? %d\n", not_present);
   //printf("User? %d\n", user);
   //printf("User Addr? %d\n", is_user_vaddr (fault_addr));
@@ -176,6 +177,7 @@ static void page_fault (struct intr_frame *f)
       if(spte == NULL){
          if(accessingStack){
             if(!grow_stack(upage)){
+               DPRINT("Failed stack grow\n");
                kill(f);
             }
             return;
@@ -183,32 +185,32 @@ static void page_fault (struct intr_frame *f)
          /*if (top_of_stack - fault_addr <= 32) {
             add_to_stack()
          }*/
-         //printf("Page not found\n");
+         DPRINT("Page not found\n");
          kill(f); //not valid fault, no spte exists
          return;
       }
       struct frame_entry *frame = allocate_frame(PAL_USER);
       //printf("Allocated frame\n");
       if (frame->page_entry==NULL || frame==NULL){
-         //printf("NULL page_entry\n");
+         DPRINT("NULL page_entry\n");
          kill(f); 
          return;
       }
       if(!load_file(frame->page_entry, spte)){
-         //printf("Failed load file\n");
-         free_frame(frame->page_entry);
+         DPRINT("Failed load file\n");
+         free_frame(frame->page_entry, true);
          kill(f);
          return;
       }
-      //printf("File loaded\n");
+      DPRINT ("File loaded\n");
 
       frame->supplemental_page_table_entry = spte;
       spte->isFaulted = true;
    }
    else if (!is_user_vaddr (fault_addr) || !not_present) {
       // PANIC ("test");
-      //printf ("Fatal Kernel Page Fault occured for %p\n", fault_addr);
-      //printf ("Present? %d\n", !not_present);
+      DPRINT ("Fatal Kernel Page Fault occured for %p\n", fault_addr);
+      DPRINT ("Present? %d\n", !not_present);
       kill(f);
       return;
    }

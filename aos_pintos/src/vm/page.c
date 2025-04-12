@@ -55,8 +55,19 @@ fte_to_spte (struct frame_entry* fte)
 
 bool load_file (void *frame, struct supplemental_page_table_entry *spte)
 {
-  if (spte->type == PAGE_FILE || spte->type == PAGE_FILE_ZERO)
+  if (spte->is_swapped)
     {
+      DPRINT ("Loading Swap\n");
+      if (!swap_in (spte->swap_index, frame))
+        {
+          return false;
+        }
+      swap_free (spte->swap_index);
+      spte->is_swapped = false;
+    }
+  else if (spte->type == PAGE_FILE || spte->type == PAGE_FILE_ZERO)
+    {
+      DPRINT ("Loading file\n");
       file_seek (spte->file, spte->offset); // reading page from file
       if (file_read (spte->file, frame, spte->read_bytes) !=
           (int) spte->read_bytes)
@@ -67,37 +78,36 @@ bool load_file (void *frame, struct supplemental_page_table_entry *spte)
     }
   else if (spte->type == PAGE_ZERO)
     {
+      DPRINT ("Loading Zero\n");
       memset (frame, 0, PGSIZE);
     }
-  else if (spte->is_swapped)
-    {
-      if (!swap_in (spte->swap_index, frame))
-        {
-          return false;
-        }
-      swap_free (spte->swap_index);
-      spte->is_swapped = false;
-    }
+  else {
+    PANIC("unable to load file\n");
+  }
+  DPRINT ("Installing %p, %p, %d\n", spte->pageAdress, frame, spte->writable);
   // installing page into process's pt
   if (!install_page (spte->pageAdress, frame, spte->writable))
     {
       return false;
     }
+  DPRINT ("Installed\n");
   spte->isFaulted = false;
   return true;
 }
 
 void clear_supplemental_page_entries (struct list *page_table_entries)
 {
-  struct list_elem *e;
-  for (e = list_begin (&page_table_entries);
-       e != list_end (&page_table_entries); e = list_next (e))
-    {
-      struct supplemental_page_table_entry *f =
-          list_entry (e, struct supplemental_page_table_entry, elem);
-      free_frame (f->pageAdress);
-      free (f);
-    }
+  struct supplemental_page_table_entry *spte;
+  while (!list_empty (page_table_entries))
+  {
+    spte = list_entry (list_pop_back (page_table_entries), struct supplemental_page_table_entry, elem);
+
+    void *kpage = pagedir_get_page(thread_current()->pagedir, spte->pageAdress);
+    DPRINT ("Clear/Free %p, frame? %p\n", spte->pageAdress, kpage);
+    if (kpage != NULL)
+      free_frame (kpage, false);
+    free (spte);
+  }
 }
 
 bool grow_stack(void *virtual_page) 
@@ -112,19 +122,24 @@ bool grow_stack(void *virtual_page)
     return false;
   }
 
+  DPRINT ("Allocating Stack\n");
+
   // Allocate a frame for the new stack page
   struct frame_entry* frame_entry = allocate_frame(PAL_USER | PAL_ZERO);
   if (frame_entry == NULL)
     return false;
 
+  DPRINT ("frame_entry %p, virt: %p\n", frame_entry->page_entry, virtual_page);
+
   // Create supplemental page table entry
   struct supplemental_page_table_entry *pte = malloc(sizeof(struct supplemental_page_table_entry));
   if (pte == NULL) {
     // Need to free the frame that was allocated
-    free_frame(frame_entry);
+    free_frame(frame_entry, true);
     return false;
   }
 
+  frame_entry->supplemental_page_table_entry = pte;
 
   // Setup the supplemental page table entry
   pte->pageAdress = virtual_page;             // The virtual address for this page
@@ -136,11 +151,15 @@ bool grow_stack(void *virtual_page)
   pte->owner = thread_current();
   pte->isFaulted = false;
   pte->type = PAGE_STACK;
+  pte->is_swapped = false;
+
+  DPRINT ("Mapping\n");
 
   // Map the physical frame to the virtual page
   if (!install_page(virtual_page, frame_entry->page_entry, true)) {
+    DPRINT ("Failed map\n");
     free(pte);
-    free_frame(frame_entry);
+    free_frame(frame_entry, true);
     return false;
   }
 
@@ -149,6 +168,8 @@ bool grow_stack(void *virtual_page)
   lock_acquire(&current->supplemental_page_table_lock);
   list_push_back(&current->supplemental_page_table, &pte->elem);
   lock_release(&current->supplemental_page_table_lock);
+
+  DPRINT ("Added spte\n");
 
   return true;
 }

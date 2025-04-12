@@ -178,6 +178,8 @@ tid_t thread_create (const char *name, int priority, thread_func *function,
   if (t == NULL)
     return TID_ERROR;
 
+  DPRINT ("Creating thread %s at %p\n", name, t);
+
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
@@ -293,6 +295,9 @@ static void mark_or_free_record (struct child_thread *record)
 void thread_exit (void)
 {
   ASSERT (!intr_context ());
+
+  // Process Exit sets the pagedir to NULL, so must clear entries now.
+  clear_supplemental_page_entries (&thread_current ()->supplemental_page_table);
 
 #ifdef USERPROG
   process_exit ();

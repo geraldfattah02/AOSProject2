@@ -14,7 +14,7 @@ struct frame_entry {
 void init_frame_table();
 
 void* allocate_frame(enum palloc_flags flags);
-void free_frame(void * page);
+void free_frame(void * page, bool shouldFreePage);
 void pin_frame(void *page);
 void unpin_frame(void *page);
 void* evict_page(void);  // Assuming it returns void*

@@ -31,6 +31,8 @@ tid_t process_execute (const char *file_and_args)
   char *fn_copy;
   tid_t tid;
 
+  //printf("Exec on %s\n", file_and_args);
+
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -42,6 +44,16 @@ tid_t process_execute (const char *file_and_args)
   char *file_name, *unparsed_args;
   file_name = strtok_r (file_and_args, " ", &unparsed_args);
 
+  DPRINT("file_name %s\n", file_name);
+
+  char* name = malloc(strlen(file_name) + 1);
+  strlcpy(name, file_name, strlen(file_name)+1);
+
+  DPRINT("name %s\n", name);
+
+  if (strlen(unparsed_args) > 0)
+    file_name[strlen(file_name)] = ' '; // Hack to "re-assemble" file_and_args after extracting the file name.
+
   struct child_thread *record = malloc (sizeof (struct child_thread));
   list_push_back (&thread_current ()->child_records, &record->elem);
   sema_init (&record->wait_child, 0);
@@ -52,14 +64,16 @@ tid_t process_execute (const char *file_and_args)
   record->should_free = false;
   record->loaded_successfully = false;
 
-  struct file *executable = filesys_open (file_name);
+  struct file *executable = filesys_open (name);
+  DPRINT("Exec file %p, %s\n", executable, name);
   if (executable == NULL)
   {
     return TID_ERROR;
   }
   file_close (executable);
 
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy, record);
+  tid = thread_create (name, PRI_DEFAULT, start_process, fn_copy, record);
+  DPRINT("Exec tid %d\n", tid);
   if (tid == TID_ERROR)
   {
     palloc_free_page (fn_copy);
@@ -476,6 +490,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
       kpage->writable = writable;
       kpage->owner = thread_current();
       kpage->isFaulted = false; //is this even needed?
+      kpage->is_swapped = false;
 
       if(page_read_bytes == PGSIZE){
         //entire page is demand-paged from the file
@@ -500,6 +515,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
+      DPRINT("Load segment at upage %p\n", upage);
       upage += PGSIZE;
       ofs += PGSIZE;
     }
@@ -606,6 +622,8 @@ static bool setup_stack(void **esp, char *file_name, char *args)
   
   // Now load arguments onto the stack
   pass_arguments(esp, file_name, args);
+
+  DPRINT("args %s %s\n", file_name, args);
   
   return true;
 }

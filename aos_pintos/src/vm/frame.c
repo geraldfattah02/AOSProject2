@@ -21,32 +21,54 @@ void init_frame_table() {
 }
 
 void* allocate_frame(enum palloc_flags flags) {
+    lock_acquire(&frame_table_lock);
     void* page = palloc_get_page (flags);
-    struct frame_entry* frame = malloc(sizeof(struct frame_entry));
-
 
     if (page == NULL) { // evict
         evict_page();
-        return allocate_frame(flags); //once we evict, call function again and there should be space now
+        // return allocate_frame(flags); //once we evict, call function again and there should be space now
+        page = palloc_get_page (flags);
+        ASSERT (page != NULL);
     }
-    else { // Add to frame table
+    
+    struct frame_entry* frame = malloc(sizeof(struct frame_entry));
+    frame->page_entry = page;
+    frame->owner_thread = thread_current();
+    frame->pinned = false;
 
-        frame->page_entry = page;
-        frame->owner_thread = thread_current();
-        frame->pinned = false;
+    DPRINT ("Allocating frame %p for %p\n", page, thread_current());
 
-        lock_acquire (&frame_table_lock);
-        list_push_back (&frame_table, &frame->elem);
-        lock_release (&frame_table_lock);
-    }  
+    //lock_acquire (&frame_table_lock);
+    list_push_back (&frame_table, &frame->elem);
+    lock_release (&frame_table_lock);
     
     return frame;
+}
+
+static void free_frame_no_lock(void* page, bool shouldFreePage)
+{
+    struct list_elem *e;
+    bool found = false;
+    for (e = list_begin (&frame_table); e != list_end (&frame_table); e = list_next (e))
+    {
+        struct frame_entry *f = list_entry (e, struct frame_entry, elem);
+        if (f->page_entry == page && f->owner_thread == thread_current ()) {
+            DPRINT ("Freed frame for %p, thread %p\n", page, thread_current ());
+            found = true;
+            list_remove (e);
+            if (shouldFreePage)
+                palloc_free_page (f->page_entry);
+            free (f);
+            break;
+        }
+    }
+    if (!found) PANIC ("No frame for %p, thread %p\n", page, thread_current ());
 }
 
 void * evict_page() {
     //go through fram table list, chcek the accessed bit for each page, if true -> set to false,
     //iterate through until there is an accessed=true (recently accessed)
-    lock_acquire(&frame_table_lock);
+    // lock_acquire(&frame_table_lock);
     struct frame_entry *victim = NULL;
     
     if (eviction_pointer == NULL || eviction_pointer == list_end(&frame_table)) {
@@ -54,6 +76,7 @@ void * evict_page() {
         struct frame_entry *f = list_entry(eviction_pointer, struct frame_entry, elem);
         victim = f;
     }
+    DPRINT("Starting eviction\n");
     // Iterate using the eviction pointer
     while (true) {
         if (eviction_pointer == list_end(&frame_table)) {
@@ -66,18 +89,19 @@ void * evict_page() {
         if (f->pinned) continue;
 
         struct supplemental_page_table_entry *spte = fte_to_spte(f);
-        // printf("Page Entry: %p\n",f->page_entry);
-        printf("Page Directory: %p\n",f->owner_thread->pagedir);
-        printf("Spte page adress: %p\n",spte->pageAdress);
+        DPRINT("Page Entry: %p\n",f->page_entry);
+        DPRINT("Page Directory: %p\n",f->owner_thread->pagedir);
+        DPRINT("Spte page adress: %p\n",spte->pageAdress);
+        DPRINT("Current %p\n", thread_current());
+        DPRINT("Owner %p\n", f->owner_thread);
         if(spte != NULL){
-            
             if (!pagedir_is_accessed(f->owner_thread->pagedir, spte->pageAdress)) {
                 victim = f;
-                printf("Not Accessed\n");
+                DPRINT("Not Accessed\n");
                 break;
             } else {
                 pagedir_set_accessed(f->owner_thread->pagedir, spte->pageAdress, false);
-                printf("Setting Access to Zero\n");
+                DPRINT("Setting Access to Zero\n");
             }
         }else{
             continue;
@@ -86,39 +110,36 @@ void * evict_page() {
     
     // Remove victim frame from table and free it
     struct supplemental_page_table_entry *spte = fte_to_spte(victim);
-    printf("Checking dirty bit\n");
+    DPRINT ("Checking dirty bit\n");
     // Check if the page is dirty and swap it out if necessary
-    if (pagedir_is_dirty(victim->owner_thread->pagedir, spte->pageAdress)) {
-        printf("Is dirty\n");
+    if (pagedir_is_dirty(victim->owner_thread->pagedir, spte->pageAdress) || spte->type == PAGE_DIRTY) {
+        DPRINT ("Is dirty\n");
         // Swap out the page
+        spte->type = PAGE_DIRTY;
         swap_index_t swap_index = swap_out(victim->page_entry);
-        printf("Swapped out\n");
+        DPRINT ("Swapped out\n");
         if (swap_index != -1) {
             //update the supplemental page table entry
+            DPRINT ("victim %p\n", victim);
+            DPRINT ("victim spte %p\n", victim->supplemental_page_table_entry);
             victim->supplemental_page_table_entry->swap_index = swap_index;
             victim->supplemental_page_table_entry->is_swapped = true;
             victim->supplemental_page_table_entry->isFaulted = false; 
         }
+        DPRINT ("Swap done\n");
     }
-    lock_release(&frame_table_lock);
 
-    free_frame(victim->page_entry);
+    pagedir_clear_page(victim->owner_thread->pagedir, spte->pageAdress);
+
+    free_frame_no_lock(victim->page_entry, true);
+    //lock_release(&frame_table_lock);
+
 }
 
-void free_frame(void* page) {
-    struct list_elem *e;
+void free_frame(void* page, bool shouldFreePage) {
 
     lock_acquire (&frame_table_lock);
-    for (e = list_begin (&frame_table); e != list_end (&frame_table); e = list_next (e))
-    {
-        struct frame_entry *f = list_entry (e, struct frame_entry, elem);
-        if (f->page_entry == page) {
-            list_remove (f);
-            palloc_free_page (f->page_entry);
-            free (f);
-            break;
-        }
-    }
+    free_frame_no_lock(page, shouldFreePage);
     lock_release (&frame_table_lock);
 }
 
