@@ -297,7 +297,7 @@ void thread_exit (void)
   ASSERT (!intr_context ());
 
   // Process Exit sets the pagedir to NULL, so must clear entries now.
-  clear_supplemental_page_entries (&thread_current ()->supplemental_page_table);
+  clear_current_supplemental_page_table ();
 
 #ifdef USERPROG
   process_exit ();

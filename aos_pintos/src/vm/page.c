@@ -95,21 +95,6 @@ bool load_file (void *frame, struct supplemental_page_table_entry *spte)
   return true;
 }
 
-void clear_supplemental_page_entries (struct list *page_table_entries)
-{
-  struct supplemental_page_table_entry *spte;
-  while (!list_empty (page_table_entries))
-  {
-    spte = list_entry (list_pop_back (page_table_entries), struct supplemental_page_table_entry, elem);
-
-    void *kpage = pagedir_get_page(thread_current()->pagedir, spte->pageAdress);
-    DPRINT ("Clear/Free %p, frame? %p\n", spte->pageAdress, kpage);
-    if (kpage != NULL)
-      free_frame (kpage, false);
-    free (spte);
-  }
-}
-
 bool grow_stack(void *virtual_page) 
 {
   ASSERT (is_user_vaddr (virtual_page));
@@ -135,7 +120,7 @@ bool grow_stack(void *virtual_page)
   struct supplemental_page_table_entry *pte = malloc(sizeof(struct supplemental_page_table_entry));
   if (pte == NULL) {
     // Need to free the frame that was allocated
-    free_frame(frame_entry, true);
+    free_frame(frame_entry);
     return false;
   }
 
@@ -159,7 +144,7 @@ bool grow_stack(void *virtual_page)
   if (!install_page(virtual_page, frame_entry->page_entry, true)) {
     DPRINT ("Failed map\n");
     free(pte);
-    free_frame(frame_entry, true);
+    free_frame(frame_entry);
     return false;
   }
 
@@ -172,4 +157,25 @@ bool grow_stack(void *virtual_page)
   DPRINT ("Added spte\n");
 
   return true;
+}
+
+void clear_current_supplemental_page_table ()
+{
+  struct list *sup_page_table = &thread_current ()->supplemental_page_table;
+  struct supplemental_page_table_entry *entry;
+
+  while (!list_empty (sup_page_table))
+    {
+      struct list_elem *cur = list_pop_back (sup_page_table);
+      entry = list_entry (cur, struct supplemental_page_table_entry, elem);
+
+      void *kpage = pagedir_get_page(thread_current ()->pagedir, entry->pageAdress);
+      DPRINT ("Clear/Free %p, frame? %p\n", entry->pageAdress, kpage);
+      pagedir_clear_page (thread_current ()->pagedir, entry->pageAdress);
+      if (kpage != NULL)
+        {
+          free_frame (kpage);
+        }
+      free (entry);
+    }
 }

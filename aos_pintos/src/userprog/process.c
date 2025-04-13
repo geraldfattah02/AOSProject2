@@ -20,39 +20,62 @@
 #include "threads/malloc.h"
 #include "vm/page.h"
 
+#define MAX_ARG_LEN ((PGSIZE / 4) * 3) /* Allow up to 3Kb */
+#define MAX_ARGC (((PGSIZE / 4) - sizeof(uint32_t)) / sizeof (char*))
+struct process_arguments {
+  char arg_strings[MAX_ARG_LEN]; 
+  char *argv[MAX_ARGC];
+  uint32_t argc;
+};
+
+/* Break argument string into argv and argc */
+static bool parse_process_arguments (struct process_arguments *args)
+{
+  char *token, *save_ptr;
+  int i = 0;
+  for (token = strtok_r (args->arg_strings, " ", &save_ptr);
+       token != NULL;
+       token = strtok_r (NULL, " ", &save_ptr))
+  {
+    if (i >= MAX_ARGC)
+    {
+      return false;
+    }
+    args->argv[i++] = token;
+  }
+  args->argc = i;
+  return true;
+}
+
+
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp, char *unparsed_args);
+static bool load (const char *cmdline, void (**eip) (void), void **esp,
+    struct process_arguments *unparsed_args);
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t process_execute (const char *file_and_args)
 {
-  char *fn_copy;
+  ASSERT(sizeof(struct process_arguments) == PGSIZE);
+  struct process_arguments *args;
   tid_t tid;
 
-  //printf("Exec on %s\n", file_and_args);
-
-  /* Make a copy of FILE_NAME.
+  /* Make a copy of file name and args.
      Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  args = palloc_get_page (0);
+  if (args == NULL)
     return TID_ERROR;
 
-  strlcpy (fn_copy, file_and_args, PGSIZE);
+  strlcpy ((char*) args, file_and_args, MAX_ARG_LEN);
+  if (!parse_process_arguments (args))
+  {
+    palloc_free_page (args);
+    return TID_ERROR;
+  }
 
-  char *file_name, *unparsed_args;
-  file_name = strtok_r (file_and_args, " ", &unparsed_args);
-
-  DPRINT("file_name %s\n", file_name);
-
-  char* name = malloc(strlen(file_name) + 1);
-  strlcpy(name, file_name, strlen(file_name)+1);
-
+  char *name = args->argv[0];
   DPRINT("name %s\n", name);
-
-  if (strlen(unparsed_args) > 0)
-    file_name[strlen(file_name)] = ' '; // Hack to "re-assemble" file_and_args after extracting the file name.
 
   struct child_thread *record = malloc (sizeof (struct child_thread));
   list_push_back (&thread_current ()->child_records, &record->elem);
@@ -68,15 +91,16 @@ tid_t process_execute (const char *file_and_args)
   DPRINT("Exec file %p, %s\n", executable, name);
   if (executable == NULL)
   {
+    palloc_free_page (args);
     return TID_ERROR;
   }
   file_close (executable);
 
-  tid = thread_create (name, PRI_DEFAULT, start_process, fn_copy, record);
+  tid = thread_create (name, PRI_DEFAULT, start_process, args, record);
   DPRINT("Exec tid %d\n", tid);
   if (tid == TID_ERROR)
   {
-    palloc_free_page (fn_copy);
+    palloc_free_page (args);
     return TID_ERROR;
   }
 
@@ -92,11 +116,10 @@ tid_t process_execute (const char *file_and_args)
 
 /* A thread function that loads a user process and starts it
    running. */
-static void start_process (void *file_and_args)
+static void start_process (void *aux)
 {
-  char *file_name, *unparsed_args;
-  file_name = strtok_r (file_and_args, " ", &unparsed_args);
-
+  struct process_arguments* args = aux;
+  char *file_name = args->argv[0];
   struct intr_frame if_;
   bool success;
 
@@ -106,7 +129,7 @@ static void start_process (void *file_and_args)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   
-  success = load (file_name, &if_.eip, &if_.esp, unparsed_args);
+  success = load (file_name, &if_.eip, &if_.esp, args);
 
   if (success)
   {
@@ -131,7 +154,7 @@ static void start_process (void *file_and_args)
   }
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
+  palloc_free_page (aux);
   if (!success)
     thread_exit ();
 
@@ -280,7 +303,7 @@ struct Elf32_Phdr
 #define PF_W 2 /* Writable. */
 #define PF_R 4 /* Readable. */
 
-static bool setup_stack (void **esp, char *file_name, char *args);
+static bool setup_stack (void **esp, char *file_name, struct process_arguments *args);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -290,7 +313,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
-bool load (const char *file_name, void (**eip) (void), void **esp, char *unparsed_args)
+bool load (const char *file_name, void (**eip) (void), void **esp, struct process_arguments *args)
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -384,7 +407,7 @@ bool load (const char *file_name, void (**eip) (void), void **esp, char *unparse
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp, file_name, unparsed_args))
+  if (!setup_stack (esp, file_name, args))
     goto done;
 
   /* Start address. */
@@ -530,22 +553,12 @@ struct argument {
 };
 
 /* Push a string value onto the stack and add to argument list */
-static bool push_string (char **esp, struct list *args, char *value)
+static char *push_string (char **esp, const char *value)
 {
-  struct argument *arg = malloc (sizeof (struct argument));
-  if (arg == NULL)
-  {
-    return false;
-  }
-
   uint32_t len = strlen (value) + 1;
-
   *esp -= len;
   memcpy (*esp, value, len);
-  arg->addr = *esp;
-  
-  list_push_front (args, &arg->elem);
-  return true;
+  return *esp;
 }
 
 /* Push a 4 byte value onto the stack */
@@ -556,23 +569,11 @@ static void push_4byte(uint32_t** esp, uint32_t value)
 }
 
 /* Push arguments on the stack and setup argc, argv */
-static bool pass_arguments (char **esp, char *file_name, char *unparsed_args)
+static bool pass_arguments (char **esp, char *file_name, struct process_arguments *args)
 {
-  struct list args;
-  list_init (&args);
-
-  bool success = push_string (esp, &args, file_name);
-  if (!success)
-    return false;
-
-  char *token, *save_ptr;
-  for (token = strtok_r (unparsed_args, " ", &save_ptr);
-       token != NULL;
-       token = strtok_r (NULL, " ", &save_ptr))
+  for (int i = 0; i < args->argc; i++)
   {
-    bool success = push_string (esp, &args, token);
-    if (!success)
-      return false;
+    args->argv[i] = push_string (esp, args->argv[i]);
   }
 
   // 4-byte word alignment 
@@ -581,24 +582,17 @@ static bool pass_arguments (char **esp, char *file_name, char *unparsed_args)
   // Add NULL sentinel
   push_4byte (esp, NULL);
 
-  // Add arguments
-  int argc = 0;
-  while (!list_empty (&args))
+  // Push arg addresses (in reverse)
+  for (int i = args->argc - 1; i >= 0; i--)
   {
-    struct list_elem *e = list_pop_front (&args);
-    struct argument *arg = list_entry (e, struct argument, elem);
-
-    push_4byte (esp, arg->addr);
-    argc += 1;
-
-    free (arg);
+    push_4byte (esp, args->argv[i]);
   }
 
   // Add argv
   push_4byte (esp, *esp);
 
   // Add argc
-  push_4byte (esp, argc);
+  push_4byte (esp, args->argc);
 
   // Add empty return address
   push_4byte (esp, NULL);
@@ -608,7 +602,7 @@ static bool pass_arguments (char **esp, char *file_name, char *unparsed_args)
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
-static bool setup_stack(void **esp, char *file_name, char *args)
+static bool setup_stack(void **esp, char *file_name, struct process_arguments *args)
 {
   // Calculate the address for the stack page (one page below PHYS_BASE)
   void *stack_page = ((uint8_t *)PHYS_BASE) - PGSIZE;
@@ -621,9 +615,8 @@ static bool setup_stack(void **esp, char *file_name, char *args)
   *esp = PHYS_BASE;
   
   // Now load arguments onto the stack
-  pass_arguments(esp, file_name, args);
-
-  DPRINT("args %s %s\n", file_name, args);
+  DPRINT("args %s %s\n", file_name, &args->arg_strings);
+  pass_arguments (esp, file_name, args);
   
   return true;
 }

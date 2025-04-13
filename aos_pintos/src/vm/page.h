@@ -40,4 +40,4 @@ bool grow_stack(void *virtual_page);
 struct supplemental_page_table_entry *get_supplemental_page_table_entry (void* fte);
 struct supplemental_page_table_entry *fte_to_spte (struct frame_entry* fte);
 
-void clear_supplemental_page_entries (struct list *page_table_entries);
+void clear_current_supplemental_page_table ();

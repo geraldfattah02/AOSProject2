@@ -198,7 +198,7 @@ static void page_fault (struct intr_frame *f)
       }
       if(!load_file(frame->page_entry, spte)){
          DPRINT("Failed load file\n");
-         free_frame(frame->page_entry, true);
+         free_frame(frame->page_entry);
          kill(f);
          return;
       }

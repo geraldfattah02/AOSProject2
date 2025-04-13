@@ -379,7 +379,7 @@ static int read (int fd, void *buffer, unsigned size, uintptr_t esp)
     }
     if(!load_file(frame->page_entry, entry)){
       printf("Failed load file\n");
-      free_frame(frame->page_entry, true);
+      free_frame(frame->page_entry);
       set_exit_code (thread_current (), -1);
       thread_exit ();
     }

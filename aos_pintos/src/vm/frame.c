@@ -45,7 +45,7 @@ void* allocate_frame(enum palloc_flags flags) {
     return frame;
 }
 
-static void free_frame_no_lock(void* page, bool shouldFreePage)
+static void free_frame_no_lock(void* page)
 {
     struct list_elem *e;
     bool found = false;
@@ -56,8 +56,7 @@ static void free_frame_no_lock(void* page, bool shouldFreePage)
             DPRINT ("Freed frame for %p, thread %p\n", page, thread_current ());
             found = true;
             list_remove (e);
-            if (shouldFreePage)
-                palloc_free_page (f->page_entry);
+            palloc_free_page (f->page_entry);
             free (f);
             break;
         }
@@ -131,15 +130,15 @@ void * evict_page() {
 
     pagedir_clear_page(victim->owner_thread->pagedir, spte->pageAdress);
 
-    free_frame_no_lock(victim->page_entry, true);
+    free_frame_no_lock(victim->page_entry);
     //lock_release(&frame_table_lock);
 
 }
 
-void free_frame(void* page, bool shouldFreePage) {
+void free_frame(void* page) {
 
     lock_acquire (&frame_table_lock);
-    free_frame_no_lock(page, shouldFreePage);
+    free_frame_no_lock(page);
     lock_release (&frame_table_lock);
 }
 
