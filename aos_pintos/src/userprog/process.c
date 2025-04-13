@@ -614,7 +614,7 @@ static bool setup_stack(void **esp, struct process_arguments *args)
   *esp = PHYS_BASE;
   
   // Now load arguments onto the stack
-  DPRINT ("args %s %s\n", file_name, &args->arg_strings);
+  DPRINT ("args %s\n", &args->arg_strings);
   pass_arguments ((char**) esp, args);
   
   return true;

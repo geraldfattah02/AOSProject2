@@ -334,90 +334,67 @@ static int filesize (int fd)
 /* READ a file */
 static int read (int fd, void *buffer, unsigned size, void *esp)
 {
-  char *end = (char*)buffer + size - 1;
-  void *upage = pg_round_down(buffer);
-  DPRINT ("read buffer %p\n", buffer);
-  DPRINT ("valid? %p\n", is_valid (buffer));
-  DPRINT ("buffer page ptr %p\n", upage);
-  DPRINT ("end buffer %p\n", end);
-  DPRINT ("valid? %p\n", validate_user_pointer (end));
+  char *end = (char*) buffer + size - 1;
+  void *upage = pg_round_down (buffer);
+  bool is_stack = stack_heuristic (buffer, esp);
+
+  // Basic pointer validation
   if (!is_valid (buffer) || is_kernel_vaddr (end))
   {
-    DPRINT ("Bad buffer\n");
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
   
-  struct thread *t = thread_current ();
-  void *kaddr = pagedir_get_page (t->pagedir, buffer); // Return kernel virtual address, or NULL if unmapped
-  DPRINT ("kaddr %p\n", kaddr);
-  DPRINT ("Stack? %d\n", stack_heuristic (buffer, esp));
-  bool is_stack = stack_heuristic (buffer, esp);
-  if (kaddr == NULL && is_stack) {
-    if(!grow_stack(upage)){
-      DPRINT ("Bad buffer2\n");
+  // Initial stack page (if needed)
+  struct thread *thread = thread_current ();
+  void *kaddr = pagedir_get_page (thread->pagedir, buffer);
+  if (kaddr == NULL && is_stack)
+  {
+    if (!grow_stack (upage))
+    {
       set_exit_code (thread_current (), -1);
       thread_exit ();
     }
-    kaddr = pagedir_get_page (t->pagedir, buffer);
+    kaddr = pagedir_get_page (thread->pagedir, buffer);
     ASSERT (kaddr != NULL);
   }
   
+  // Get supplemental page entry.
   struct sup_page_table_entry *entry = lookup_sup_page_entry (upage);
-
-  if (entry == NULL) {
+  if (entry == NULL)
+  {
     DPRINT ("Doesn't exist in spt\n");
     set_exit_code (thread_current (), -1);
     thread_exit ();
-  } else if (kaddr == NULL) { // Page exists, but not loaded. Load it.
-    struct frame_table_entry *frame = allocate_frame(PAL_USER);
-    DPRINT ("Allocated frame\n");
-    if (frame->kpage_addr==NULL || frame==NULL){
-      DPRINT ("NULL kpage_addr\n");
-      set_exit_code (thread_current (), -1);
-      thread_exit ();
-    }
-    if(!load_file(frame->kpage_addr, entry)){
-      printf("Failed load file\n");
-      free_frame_entry (frame);
-      set_exit_code (thread_current (), -1);
-      thread_exit ();
-    }
-    DPRINT ("Loaded entry into %p\n", frame->kpage_addr);
-    kaddr = frame->kpage_addr;
   }
 
-  //printf("Entry %p\n", entry);
-  if (!entry->writable) {
+  // Check if page is writeable.
+  if (!entry->writable)
+  {
     DPRINT ("Not writeable\n");
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
 
-  DPRINT ("Valid read buffer\n");
-
+  // Add enough stack pages to hold the file.
   char *start = buffer;
-  while (pg_round_down(start) < pg_round_down(end))
+  while (pg_round_down (start) < pg_round_down (end))
   {
-    //printf("end %p, start %p\n", end, start);
     start += PGSIZE;
-    void *upage = pg_round_down(start);
-    //printf("creating page at %p\n", upage);
+    void *upage = pg_round_down (start);
     struct sup_page_table_entry *spte = lookup_sup_page_entry (upage); 
-    if (spte == NULL) {
-      //printf("Growing stack %p\n", upage);
+    if (spte == NULL)
+    {
       grow_stack (upage);
     }
   }
-
-  //printf("Done growing\n");
 
   if (fd == STDIN_FILENO)
   {
     unsigned len = 0;
     uint8_t c;
     // Read size bytes, or until NULL
-    while (len < size && (c = input_getc()) > 0)
+    while (len < size && (c = input_getc ()) > 0)
     {
       *(uint8_t*) buffer = c;
       len += 1;

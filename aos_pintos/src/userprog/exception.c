@@ -112,9 +112,10 @@ static void kill (struct intr_frame *f)
 
 bool stack_heuristic (void *user_addr, void *esp)
 {
-   return (uint32_t*) user_addr >= (uint32_t*) esp - 32
-       && (uint32_t*) user_addr <  (uint32_t*) PHYS_BASE
-       && (uint32_t*) user_addr >= (uint32_t*) PHYS_BASE - MAX_STACK_SIZE;
+  DPRINT ("%p, %p\n", user_addr, esp);
+  return (uint32_t*) user_addr >= (uint32_t*) esp - 32
+      && (uint32_t*) user_addr <  (uint32_t*) PHYS_BASE
+      && (uint32_t*) user_addr >= (uint32_t*) PHYS_BASE - MAX_STACK_SIZE;
 }
 
 /* Page fault handler.  This is a skeleton that must be filled in
@@ -200,7 +201,7 @@ static void page_fault (struct intr_frame *f)
   
     struct frame_table_entry *frame = allocate_frame (PAL_USER);
 
-    if(!load_file (frame->kpage_addr, spte))
+    if(!load_spte_into_frame (frame->kpage_addr, spte))
     {
       DPRINT ("Failed load file\n");
       free_frame_entry (frame);
