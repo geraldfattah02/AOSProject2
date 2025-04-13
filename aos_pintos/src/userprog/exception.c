@@ -110,11 +110,11 @@ static void kill (struct intr_frame *f)
     }
 }
 
-bool stack_heuristic (uintptr_t addr, uintptr_t esp)
+bool stack_heuristic (void *user_addr, void *esp)
 {
-   return addr >= esp - 32
-      && addr < (uintptr_t)PHYS_BASE
-      && addr >= (uintptr_t)PHYS_BASE - MAX_STACK_SIZE;
+   return (uint32_t*) user_addr >= (uint32_t*) esp - 32
+       && (uint32_t*) user_addr <  (uint32_t*) PHYS_BASE
+       && (uint32_t*) user_addr >= (uint32_t*) PHYS_BASE - MAX_STACK_SIZE;
 }
 
 /* Page fault handler.  This is a skeleton that must be filled in
@@ -134,6 +134,9 @@ static void page_fault (struct intr_frame *f)
   bool write;       /* True: access was write, false: access was read. */
   bool user;        /* True: access by user, false: access by kernel. */
   void *fault_addr; /* Fault address. */
+
+  (void) user;
+  (void) write;
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -159,61 +162,59 @@ static void page_fault (struct intr_frame *f)
   bool accessingStack = false;
 
   //Check if the faulting address is accessing the stack
-  if (stack_heuristic(fault_addr, f->esp)) {
-     accessingStack = true;
+  if (stack_heuristic (fault_addr, f->esp))
+  {
+    accessingStack = true;
   }
   DPRINT ("Page Fault occured for %p\n", fault_addr);
-  // ASSERT (fault_addr != 0);
-  //printf("Not present? %d\n", not_present);
-  //printf("User? %d\n", user);
-  //printf("User Addr? %d\n", is_user_vaddr (fault_addr));
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
    
-   if (not_present && is_user_vaddr (fault_addr)) {
-      //printf("Here 1\n");
-      void *upage = pg_round_down(fault_addr);
-      struct sup_page_table_entry *spte = lookup_sup_page_entry (upage);
-      if(spte == NULL){
-         if(accessingStack){
-            if(!grow_stack(upage)){
-               DPRINT("Failed stack grow\n");
-               kill(f);
-            }
-            return;
-         }
-         /*if (top_of_stack - fault_addr <= 32) {
-            add_to_stack()
-         }*/
-         DPRINT("Page not found\n");
-         kill(f); //not valid fault, no spte exists
-         return;
-      }
-      struct frame_table_entry *frame = allocate_frame(PAL_USER);
-      //printf("Allocated frame\n");
-      if (frame->kpage_addr==NULL || frame==NULL){
-         DPRINT("NULL kpage_addr\n");
-         kill(f); 
-         return;
-      }
-      if(!load_file(frame->kpage_addr, spte)){
-         DPRINT("Failed load file\n");
-         free_frame(frame->kpage_addr);
-         kill(f);
-         return;
-      }
-      DPRINT ("File loaded\n");
+  if (not_present && is_user_vaddr (fault_addr))
+  {
+    void *upage = pg_round_down (fault_addr);
+    struct sup_page_table_entry *spte = lookup_sup_page_entry (upage);
 
-      frame->current_sup_page = spte;
-   }
-   else if (!is_user_vaddr (fault_addr) || !not_present) {
-      // PANIC ("test");
-      DPRINT ("Fatal Kernel Page Fault occured for %p\n", fault_addr);
-      DPRINT ("Present? %d\n", !not_present);
-      kill(f);
+    if (spte == NULL)
+    {
+      /* Trying to access a page with no stpe */
+      if (!accessingStack)
+      {
+        DPRINT ("Page not found, not part of stack.\n");
+        kill (f);
+        return;
+      }
+
+      if (!grow_stack (upage))
+      {
+        DPRINT ("Failed to grow stack.\n");
+        kill (f);
+        return;
+      }
+
+      /* Stack growth successful, return to thread. */
       return;
-   }
-   //printf("Here 2\n");
+    }
+  
+    struct frame_table_entry *frame = allocate_frame (PAL_USER);
+
+    if(!load_file (frame->kpage_addr, spte))
+    {
+      DPRINT ("Failed load file\n");
+      free_frame_entry (frame);
+      kill (f);
+      return;
+    }
+
+    frame->current_sup_page = spte;
+    return;
+  }
+  else
+  {
+    DPRINT ("Fatal Page Fault occured for %p, killing thread.\n", fault_addr);
+    kill (f);
+    return;
+  }
 }

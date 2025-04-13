@@ -14,24 +14,34 @@ struct list frame_table;
 struct list_elem *eviction_pointer = NULL;
 
 
-void init_frame_table() {
+void init_frame_table (void)
+{
     list_init (&frame_table);
     lock_init (&frame_table_lock);
     lock_init(&eviction_lock);
 }
 
-void* allocate_frame(enum palloc_flags flags) {
+void* allocate_frame (enum palloc_flags flags) 
+{
     lock_acquire(&frame_table_lock);
     void* page = palloc_get_page (flags);
 
     if (page == NULL) { // evict
-        evict_page();
+        evict_page ();
         // return allocate_frame(flags); //once we evict, call function again and there should be space now
         page = palloc_get_page (flags);
-        ASSERT (page != NULL);
     }
+
+    ASSERT (page != NULL);
     
     struct frame_table_entry* frame = malloc(sizeof(struct frame_table_entry));
+    if (frame == NULL)
+    {
+        lock_release (&frame_table_lock);
+        set_exit_code (thread_current (), -1);
+        thread_exit ();
+    }
+
     frame->kpage_addr = page;
     frame->owner_thread = thread_current();
     frame->pinned = false;
@@ -45,7 +55,14 @@ void* allocate_frame(enum palloc_flags flags) {
     return frame;
 }
 
-static void free_frame_no_lock(void* page)
+void free_frame_entry (struct frame_table_entry *entry)
+{
+    list_remove (&entry->elem);
+    palloc_free_page (entry->kpage_addr);
+    free (entry);
+}
+
+static void free_frame_no_lock (void* page)
 {
     struct list_elem *e;
     bool found = false;
@@ -55,16 +72,15 @@ static void free_frame_no_lock(void* page)
         if (f->kpage_addr == page && f->owner_thread == thread_current ()) {
             DPRINT ("Freed frame for %p, thread %p\n", page, thread_current ());
             found = true;
-            list_remove (e);
-            palloc_free_page (f->kpage_addr);
-            free (f);
+            free_frame_entry (f);
             break;
         }
     }
     if (!found) PANIC ("No frame for %p, thread %p\n", page, thread_current ());
 }
 
-void * evict_page() {
+void evict_page ()
+{
     //go through fram table list, chcek the accessed bit for each page, if true -> set to false,
     //iterate through until there is an accessed=true (recently accessed)
     // lock_acquire(&frame_table_lock);
@@ -72,10 +88,10 @@ void * evict_page() {
     
     if (eviction_pointer == NULL || eviction_pointer == list_end(&frame_table)) {
         eviction_pointer = list_begin(&frame_table);
-        struct framframe_table_entrye_entry *f = list_entry(eviction_pointer, struct frame_table_entry, elem);
+        struct frame_table_entry *f = list_entry(eviction_pointer, struct frame_table_entry, elem);
         victim = f;
     }
-    DPRINT("Starting eviction\n");
+    DPRINT ("Starting eviction\n");
     // Iterate using the eviction pointer
     while (true) {
         if (eviction_pointer == list_end(&frame_table)) {
@@ -88,19 +104,19 @@ void * evict_page() {
         if (f->pinned) continue;
 
         struct sup_page_table_entry *spte = f->current_sup_page;
-        DPRINT("Page Entry: %p\n",f->kpage_addr);
-        DPRINT("Page Directory: %p\n",f->owner_thread->pagedir);
-        DPRINT("Spte page adress: %p\n",spte->user_page);
-        DPRINT("Current %p\n", thread_current());
-        DPRINT("Owner %p\n", f->owner_thread);
+        DPRINT ("Page Entry: %p\n",f->kpage_addr);
+        DPRINT ("Page Directory: %p\n",f->owner_thread->pagedir);
+        DPRINT ("Spte page adress: %p\n",spte->user_page);
+        DPRINT ("Current %p\n", thread_current());
+        DPRINT ("Owner %p\n", f->owner_thread);
         if(spte != NULL){
             if (!pagedir_is_accessed(f->owner_thread->pagedir, spte->user_page)) {
                 victim = f;
-                DPRINT("Not Accessed\n");
+                DPRINT ("Not Accessed\n");
                 break;
             } else {
                 pagedir_set_accessed(f->owner_thread->pagedir, spte->user_page, false);
-                DPRINT("Setting Access to Zero\n");
+                DPRINT ("Setting Access to Zero\n");
             }
         }else{
             continue;
@@ -117,13 +133,13 @@ void * evict_page() {
         spte->page_type = PAGE_CHANGED;
         swap_index_t swap_index = swap_out(victim->kpage_addr);
         DPRINT ("Swapped out\n");
-        if (swap_index != -1) {
-            //update the supplemental page table entry
-            DPRINT ("victim %p\n", victim);
-            DPRINT ("victim spte %p\n", victim->current_sup_page);
-            victim->current_sup_page->swap_index = swap_index;
-            victim->current_sup_page->is_swapped = true;
-        }
+
+        //update the supplemental page table entry
+        DPRINT ("victim %p\n", victim);
+        DPRINT ("victim spte %p\n", victim->current_sup_page);
+        victim->current_sup_page->swap_index = swap_index;
+        victim->current_sup_page->is_swapped = true;
+
         DPRINT ("Swap done\n");
     }
 
@@ -134,39 +150,46 @@ void * evict_page() {
 
 }
 
-void free_frame(void* page) {
+void free_frame (void* page)
+{
 
     lock_acquire (&frame_table_lock);
     free_frame_no_lock(page);
     lock_release (&frame_table_lock);
 }
 
-static struct frame_table_entry * find_frame_entry(void *page)
+struct frame_table_entry * find_frame_entry (void *kpage)
 {
   struct list_elem *e;
   
-  // Search through the frame table
-  for (e = list_begin(&frame_table); e != list_end(&frame_table); e = list_next(e))
+  lock_acquire (&frame_table_lock);
+  for (e = list_begin (&frame_table); e != list_end (&frame_table); e = list_next (e))
   {
     struct frame_table_entry *entry = list_entry(e, struct frame_table_entry, elem);
-    if (entry->kpage_addr == page)
+    if (entry->kpage_addr == kpage)
+    {
+      lock_release (&frame_table_lock);
       return entry;
+    }
   }
   
+  lock_release (&frame_table_lock);
   return NULL;
 }
 
-void pin_frame(void *page) {
+void pin_frame(void *kpage)
+{
     lock_acquire(&frame_table_lock);
-    struct frame_table_entry *entry = find_frame_entry(page);
+    struct frame_table_entry *entry = find_frame_entry(kpage);
     if (entry != NULL)
         entry->pinned = true;
     lock_release(&frame_table_lock);
 }
 
-void unpin_frame(void *page) {
+void unpin_frame(void *kpage)
+{
     lock_acquire(&frame_table_lock);
-    struct frame_table_entry *entry = find_frame_entry(page);
+    struct frame_table_entry *entry = find_frame_entry(kpage);
     if (entry != NULL)
         entry->pinned = false;
     lock_release(&frame_table_lock);

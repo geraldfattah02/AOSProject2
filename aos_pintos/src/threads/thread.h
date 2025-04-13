@@ -160,4 +160,7 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+/* Set a thread's status code */
+void set_exit_code (struct thread *t, int code);
+
 #endif /* threads/thread.h */

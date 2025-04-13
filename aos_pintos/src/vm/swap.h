@@ -8,15 +8,15 @@
 typedef size_t swap_index_t;
 
 /* Initialize the swap system */
-void swap_init(void);
+void swap_init (void);
 
 /* Swap out a page to the swap partition */
-swap_index_t swap_out(void *frame);
+swap_index_t swap_out (void *frame);
 
 /* Swap in a page from the swap partition */
-bool swap_in(swap_index_t swap_index, void *frame);
+bool swap_in (swap_index_t swap_index, void *frame);
 
 /* Free a swap slot */
-void swap_free(swap_index_t swap_index);
+void swap_free (swap_index_t swap_index);
 
 #endif /* vm/swap.h */

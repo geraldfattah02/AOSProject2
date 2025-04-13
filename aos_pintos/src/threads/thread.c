@@ -17,6 +17,7 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+#include "vm/page.h"
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -599,6 +600,13 @@ static tid_t allocate_tid (void)
   lock_release (&tid_lock);
 
   return tid;
+}
+
+/* Set a thread's status code */
+void set_exit_code (struct thread *t, int code)
+{
+  if (t->parent_record != NULL)
+    t->parent_record->exit_code = code;
 }
 
 /* Offset of `stack' member within `struct thread'.

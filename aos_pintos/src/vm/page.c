@@ -8,6 +8,7 @@ delete page table entry from memory
 #include "vm/page.h"
 #include "threads/vaddr.h"
 #include <string.h>
+#include "filesys/file.h"
 
 struct sup_page_table_entry *
 lookup_sup_page_entry (void *upage)
@@ -71,7 +72,8 @@ bool load_file (void *frame, struct sup_page_table_entry *spte)
   return true;
 }
 
-struct sup_page_table_entry *init_stack_entry (void *upage, struct frame_table_entry *frame)
+static struct sup_page_table_entry *
+init_stack_entry (void *upage, struct frame_table_entry *frame)
 {
   DPRINT ("frame_entry %p, virt: %p\n", frame_entry->kpage_addr, virtual_page);
 
@@ -79,7 +81,7 @@ struct sup_page_table_entry *init_stack_entry (void *upage, struct frame_table_e
   struct sup_page_table_entry *pte = malloc(sizeof(struct sup_page_table_entry));
   if (pte == NULL) {
     // Need to free the frame that was allocated
-    free_frame(frame->kpage_addr);
+    free_frame_entry (frame);
     return false;
   }
 
@@ -125,7 +127,7 @@ bool grow_stack(void *virtual_page)
   if (!install_page(virtual_page, frame_entry->kpage_addr, true)) {
     DPRINT ("Failed map\n");
     free(spte);
-    free_frame(frame_entry);
+    free_frame_entry (frame_entry);
     return false;
   }
 
@@ -140,7 +142,7 @@ bool grow_stack(void *virtual_page)
   return true;
 }
 
-void clear_current_supplemental_page_table ()
+void clear_current_supplemental_page_table (void)
 {
   struct list *sup_page_table = &thread_current ()->supplemental_page_table;
   struct sup_page_table_entry *entry;
@@ -155,7 +157,7 @@ void clear_current_supplemental_page_table ()
       pagedir_clear_page (thread_current ()->pagedir, entry->user_page);
       if (kpage != NULL)
         {
-          free_frame (kpage);
+          free_frame_entry ( find_frame_entry (kpage));
         }
       free (entry);
     }

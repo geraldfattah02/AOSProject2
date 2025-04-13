@@ -12,6 +12,6 @@
 void exception_init (void);
 void exception_print_stats (void);
 
-bool stack_heuristic (uintptr_t addr, uintptr_t esp);
+bool stack_heuristic (void *user_addr, void *esp);
 
 #endif /* userprog/exception.h */

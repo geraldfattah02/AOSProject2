@@ -32,7 +32,7 @@ struct process_arguments {
 static bool parse_process_arguments (struct process_arguments *args)
 {
   char *token, *save_ptr;
-  int i = 0;
+  uint32_t i = 0;
   for (token = strtok_r (args->arg_strings, " ", &save_ptr);
        token != NULL;
        token = strtok_r (NULL, " ", &save_ptr))
@@ -75,7 +75,7 @@ tid_t process_execute (const char *file_and_args)
   }
 
   char *name = args->argv[0];
-  DPRINT("name %s\n", name);
+  DPRINT ("name %s\n", name);
 
   struct child_thread *record = malloc (sizeof (struct child_thread));
   list_push_back (&thread_current ()->child_records, &record->elem);
@@ -88,7 +88,7 @@ tid_t process_execute (const char *file_and_args)
   record->loaded_successfully = false;
 
   struct file *executable = filesys_open (name);
-  DPRINT("Exec file %p, %s\n", executable, name);
+  DPRINT ("Exec file %p, %s\n", executable, name);
   if (executable == NULL)
   {
     palloc_free_page (args);
@@ -97,7 +97,7 @@ tid_t process_execute (const char *file_and_args)
   file_close (executable);
 
   tid = thread_create (name, PRI_DEFAULT, start_process, args, record);
-  DPRINT("Exec tid %d\n", tid);
+  DPRINT ("Exec tid %d\n", tid);
   if (tid == TID_ERROR)
   {
     palloc_free_page (args);
@@ -180,7 +180,7 @@ static void start_process (void *aux)
 int process_wait (tid_t child_tid)
 {
   struct list_elem *e;
-  struct child_thread *child;
+  struct child_thread *child = NULL;
   struct list *list = &thread_current ()->child_records;
   for (e = list_begin (list); e != list_end (list); e = list_next (e))
   {
@@ -303,7 +303,7 @@ struct Elf32_Phdr
 #define PF_W 2 /* Writable. */
 #define PF_R 4 /* Readable. */
 
-static bool setup_stack (void **esp, char *file_name, struct process_arguments *args);
+static bool setup_stack (void **esp, struct process_arguments *args);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -407,7 +407,7 @@ bool load (const char *file_name, void (**eip) (void), void **esp, struct proces
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp, file_name, args))
+  if (!setup_stack (esp, args))
     goto done;
 
   /* Start address. */
@@ -536,7 +536,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
-      DPRINT("Load segment at upage %p\n", upage);
+      DPRINT ("Load segment at upage %p\n", upage);
       upage += PGSIZE;
       ofs += PGSIZE;
     }
@@ -560,16 +560,17 @@ static char *push_string (char **esp, const char *value)
 }
 
 /* Push a 4 byte value onto the stack */
-static void push_4byte(uint32_t** esp, uint32_t value)
+static void push_4byte(char **stack, uint32_t value)
 {
+  uint32_t **esp = (uint32_t**) stack;
   *esp -= 1;
   **esp = value;
 }
 
 /* Push arguments on the stack and setup argc, argv */
-static bool pass_arguments (char **esp, char *file_name, struct process_arguments *args)
+static bool pass_arguments (char **esp, struct process_arguments *args)
 {
-  for (int i = 0; i < args->argc; i++)
+  for (uint32_t i = 0; i < args->argc; i++)
   {
     args->argv[i] = push_string (esp, args->argv[i]);
   }
@@ -578,29 +579,29 @@ static bool pass_arguments (char **esp, char *file_name, struct process_argument
   *esp -= ((uint32_t) *esp) % 4;
 
   // Add NULL sentinel
-  push_4byte (esp, NULL);
+  push_4byte (esp, 0);
 
   // Push arg addresses (in reverse)
-  for (int i = args->argc - 1; i >= 0; i--)
+  for (int i = (int) args->argc - 1; i >= 0; i--)
   {
-    push_4byte (esp, args->argv[i]);
+    push_4byte (esp, (uint32_t) args->argv[i]);
   }
 
   // Add argv
-  push_4byte (esp, *esp);
+  push_4byte (esp, (uint32_t) *esp);
 
   // Add argc
   push_4byte (esp, args->argc);
 
   // Add empty return address
-  push_4byte (esp, NULL);
+  push_4byte (esp, 0);
 
   return true;
 }
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
-static bool setup_stack(void **esp, char *file_name, struct process_arguments *args)
+static bool setup_stack(void **esp, struct process_arguments *args)
 {
   // Calculate the address for the stack page (one page below PHYS_BASE)
   void *stack_page = ((uint8_t *)PHYS_BASE) - PGSIZE;
@@ -613,8 +614,8 @@ static bool setup_stack(void **esp, char *file_name, struct process_arguments *a
   *esp = PHYS_BASE;
   
   // Now load arguments onto the stack
-  DPRINT("args %s %s\n", file_name, &args->arg_strings);
-  pass_arguments (esp, file_name, args);
+  DPRINT ("args %s %s\n", file_name, &args->arg_strings);
+  pass_arguments ((char**) esp, args);
   
   return true;
 }

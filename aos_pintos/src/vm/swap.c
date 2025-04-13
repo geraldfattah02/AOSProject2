@@ -19,8 +19,7 @@ static struct lock swap_lock;
 /* Number of sectors per page */
 #define PAGE_SECTORS (PGSIZE / BLOCK_SECTOR_SIZE)
 
-void
-swap_init(void)
+void swap_init (void)
 {
   /* Get the swap device */
   swap_device = block_get_role(BLOCK_SWAP);
@@ -72,7 +71,7 @@ swap_out(void *frame)
                  (uint8_t *)frame + i * BLOCK_SECTOR_SIZE);
     }
 
-  //printf("Swapping out %p to %d\n", frame, swap_index);
+  DPRINT ("Swapping out %p to %d\n", frame, swap_index);
   
   lock_release(&swap_lock);
   
@@ -85,7 +84,7 @@ swap_in(swap_index_t swap_index, void *frame)
 {
   ASSERT(frame != NULL);
 
-  //printf("Swapping in %d to %p\n", swap_index, frame);
+  DPRINT ("Swapping in %d to %p\n", swap_index, frame);
   
   /* Acquire the swap lock */
   lock_acquire(&swap_lock);
