@@ -1,11 +1,11 @@
 #ifndef __VM_FRAME_H
 #define __VM_FRAME_H
 
-struct frame_entry {
-    void* page_entry;
+struct frame_table_entry {
     struct list_elem elem;
+    void* kpage_addr;
     struct thread * owner_thread;
-    struct supplemental_page_table_entry * supplemental_page_table_entry;
+    struct sup_page_table_entry *current_sup_page;
     bool pinned;
 };
 

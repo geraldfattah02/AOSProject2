@@ -4,6 +4,7 @@
 #include "devices/block.h"
 #include "threads/interrupt.h"
 #include <string.h>
+#include "lib/stdio.h"
 #include "threads/vaddr.h"
 #include "userprog/process.h"
 #include "userprog/pagedir.h"
@@ -335,10 +336,11 @@ static int filesize (int fd)
 static int read (int fd, void *buffer, unsigned size, uintptr_t esp)
 {
   char *end = (char*)buffer + size - 1;
-  unsigned page_size_remaining = (unsigned) (((char*) pg_round_down(buffer) + PGSIZE) - (char*) buffer);
+  void *upage = pg_round_down(buffer);
+  unsigned page_size_remaining = (unsigned) (((char*) upage + PGSIZE) - (char*) buffer);
   DPRINT("read buffer %p\n", buffer);
   DPRINT("valid? %p\n", is_valid (buffer));
-  DPRINT("buffer page ptr %p\n", pg_round_down(buffer));
+  DPRINT("buffer page ptr %p\n", upage);
   DPRINT("end buffer %p\n", end);
   DPRINT("valid? %p\n", validate_user_pointer (end));
   if (!is_valid (buffer) || is_kernel_vaddr (end))
@@ -354,7 +356,7 @@ static int read (int fd, void *buffer, unsigned size, uintptr_t esp)
   DPRINT("Stack? %d\n", stack_heuristic(buffer, esp));
   bool is_stack = stack_heuristic(buffer, esp);
   if (kaddr == NULL && is_stack) {
-    if(!grow_stack(pg_round_down(buffer))){
+    if(!grow_stack(upage)){
       DPRINT("Bad buffer2\n");
       set_exit_code (thread_current (), -1);
       thread_exit ();
@@ -363,28 +365,28 @@ static int read (int fd, void *buffer, unsigned size, uintptr_t esp)
     ASSERT (kaddr != NULL);
   }
   
-  struct supplemental_page_table_entry *entry = get_supplemental_page_table_entry(pg_round_down(buffer));
+  struct sup_page_table_entry *entry = lookup_sup_page_entry (upage);
 
   if (entry == NULL) {
     DPRINT ("Doesn't exist in spt\n");
     set_exit_code (thread_current (), -1);
     thread_exit ();
   } else if (kaddr == NULL) { // Page exists, but not loaded. Load it.
-    struct frame_entry *frame = allocate_frame(PAL_USER);
+    struct frame_table_entry *frame = allocate_frame(PAL_USER);
     DPRINT ("Allocated frame\n");
-    if (frame->page_entry==NULL || frame==NULL){
-      DPRINT ("NULL page_entry\n");
+    if (frame->kpage_addr==NULL || frame==NULL){
+      DPRINT ("NULL kpage_addr\n");
       set_exit_code (thread_current (), -1);
       thread_exit ();
     }
-    if(!load_file(frame->page_entry, entry)){
+    if(!load_file(frame->kpage_addr, entry)){
       printf("Failed load file\n");
-      free_frame(frame->page_entry);
+      free_frame(frame->kpage_addr);
       set_exit_code (thread_current (), -1);
       thread_exit ();
     }
-    DPRINT ("Loaded entry into %p\n", frame->page_entry);
-    kaddr = frame->page_entry;
+    DPRINT ("Loaded entry into %p\n", frame->kpage_addr);
+    kaddr = frame->kpage_addr;
   }
 
   //printf("Entry %p\n", entry);
@@ -403,7 +405,7 @@ static int read (int fd, void *buffer, unsigned size, uintptr_t esp)
     start += PGSIZE;
     void *upage = pg_round_down(start);
     //printf("creating page at %p\n", upage);
-    struct supplemental_page_table_entry *spte = get_supplemental_page_table_entry(upage); 
+    struct sup_page_table_entry *spte = lookup_sup_page_entry (upage); 
     if (spte == NULL) {
       //printf("Growing stack %p\n", upage);
       grow_stack (upage);
@@ -433,36 +435,11 @@ static int read (int fd, void *buffer, unsigned size, uintptr_t esp)
     return -1;
   }
   
-  //printf("Locked\n");
   lock_acquire (&filesys_lock);
-  //printf("Reading %d\n", size);
-  off_t total_bytes_read = 0;
-  if (size <= page_size_remaining) {
-    total_bytes_read = file_read (file_descriptor->file, buffer, size);
-  } else {
-    bool done = false;
-    while (!done) {
-      //printf("Reading size %d\n", page_size_remaining);
-      //printf("start %p\n", buffer);
-
-      // ((int*)buffer)[0] = 1;
-      //printf("wrote\n");
-      off_t bytes_read = file_read (file_descriptor->file, buffer, page_size_remaining);
-      total_bytes_read += bytes_read;
-      //printf("read %d bytes\n", bytes_read);
-      size -= bytes_read;
-      if (bytes_read != page_size_remaining || size <= 0) {
-        done = true;
-        break;
-      }
-      buffer = (char*) buffer + bytes_read;
-      page_size_remaining = size <= PGSIZE ? size : PGSIZE;
-    }
-  }
+  off_t bytes_read = file_read (file_descriptor->file, buffer, size);
   lock_release (&filesys_lock);
-  //printf("Released\n");
 
-  return total_bytes_read;
+  return bytes_read;
 }
 
 /* WRITE to a file */

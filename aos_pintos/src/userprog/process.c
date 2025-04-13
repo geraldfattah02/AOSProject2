@@ -501,37 +501,35 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
       /* Get a page of memory. */
-      struct supplemental_page_table_entry *kpage = malloc(sizeof(struct supplemental_page_table_entry));
+      struct sup_page_table_entry *kpage = malloc(sizeof(struct sup_page_table_entry));
       if (kpage == NULL)
         return false;
 
-      kpage->pageAdress = upage; //virtual page address
+      kpage->user_page = upage; //virtual page address
       kpage->read_bytes = page_read_bytes;
       kpage->zero_bytes = page_zero_bytes;
       kpage->file = file;
       kpage->offset = ofs;
       kpage->writable = writable;
-      kpage->owner = thread_current();
-      kpage->isFaulted = false; //is this even needed?
       kpage->is_swapped = false;
 
       if(page_read_bytes == PGSIZE){
         //entire page is demand-paged from the file
-        kpage->type = PAGE_FILE;
+        kpage->page_type = PAGE_FROM_FILE;
         kpage->zero_bytes = 0;
       }
       else if(page_read_bytes == PGSIZE){
         //entire page is zeroed
-        kpage->type = PAGE_ZERO;
+        kpage->page_type = PAGE_ALL_ZERO;
       }
       else{
         //part of page is from file, part is zeroed
-        kpage->type = PAGE_FILE_ZERO;
+        kpage->page_type = PAGE_FROM_FILE;
       }
 
       struct thread *current = thread_current ();
       lock_acquire(&current->supplemental_page_table_lock);
-      //printf("Creating page %p\n", kpage->pageAdress);
+      //printf("Creating page %p\n", kpage->user_page);
       list_push_back(&current->supplemental_page_table, &kpage->elem);
       lock_release(&current->supplemental_page_table_lock);
         

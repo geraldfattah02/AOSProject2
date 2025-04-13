@@ -112,7 +112,9 @@ static void kill (struct intr_frame *f)
 
 bool stack_heuristic (uintptr_t addr, uintptr_t esp)
 {
-   return addr >= esp - 32 && addr < (uintptr_t)PHYS_BASE;
+   return addr >= esp - 32
+      && addr < (uintptr_t)PHYS_BASE
+      && addr >= (uintptr_t)PHYS_BASE - MAX_STACK_SIZE;
 }
 
 /* Page fault handler.  This is a skeleton that must be filled in
@@ -173,7 +175,7 @@ static void page_fault (struct intr_frame *f)
    if (not_present && is_user_vaddr (fault_addr)) {
       //printf("Here 1\n");
       void *upage = pg_round_down(fault_addr);
-      struct supplemental_page_table_entry *spte = get_supplemental_page_table_entry(upage);
+      struct sup_page_table_entry *spte = lookup_sup_page_entry (upage);
       if(spte == NULL){
          if(accessingStack){
             if(!grow_stack(upage)){
@@ -189,23 +191,22 @@ static void page_fault (struct intr_frame *f)
          kill(f); //not valid fault, no spte exists
          return;
       }
-      struct frame_entry *frame = allocate_frame(PAL_USER);
+      struct frame_table_entry *frame = allocate_frame(PAL_USER);
       //printf("Allocated frame\n");
-      if (frame->page_entry==NULL || frame==NULL){
-         DPRINT("NULL page_entry\n");
+      if (frame->kpage_addr==NULL || frame==NULL){
+         DPRINT("NULL kpage_addr\n");
          kill(f); 
          return;
       }
-      if(!load_file(frame->page_entry, spte)){
+      if(!load_file(frame->kpage_addr, spte)){
          DPRINT("Failed load file\n");
-         free_frame(frame->page_entry);
+         free_frame(frame->kpage_addr);
          kill(f);
          return;
       }
       DPRINT ("File loaded\n");
 
-      frame->supplemental_page_table_entry = spte;
-      spte->isFaulted = true;
+      frame->current_sup_page = spte;
    }
    else if (!is_user_vaddr (fault_addr) || !not_present) {
       // PANIC ("test");
