@@ -9,16 +9,16 @@
 #include "swap.h"
 #include "page.h"
 
-struct lock frame_table_lock;
-struct lock eviction_lock;
 struct list frame_table;
+struct lock frame_table_lock;
+
+static void evict_page (void);
 
 /* Initialize the frame table. */
 void init_frame_table (void)
 {
   list_init (&frame_table);
   lock_init (&frame_table_lock);
-  lock_init (&eviction_lock);
 }
 
 /* Allocate a new frame. */
@@ -46,11 +46,10 @@ allocate_frame (enum palloc_flags flags)
 
   frame->kpage_addr = page;
   frame->owner_thread = thread_current ();
-  frame->pinned = false;
+  frame->pinned = true;
 
   DPRINT ("Allocating frame %p for %p\n", page, thread_current ());
 
-  //lock_acquire (&frame_table_lock);
   list_push_back (&frame_table, &frame->elem);
   lock_release (&frame_table_lock);
   
@@ -86,7 +85,7 @@ eviction_policy (void)
   if (eviction_pointer == NULL || eviction_pointer == list_end (&frame_table))
   {
     eviction_pointer = list_begin (&frame_table);
-    struct frame_table_entry *f = list_entry(eviction_pointer, struct frame_table_entry, elem);
+    struct frame_table_entry *f = list_entry (eviction_pointer, struct frame_table_entry, elem);
     victim = f;
   }
 
@@ -98,8 +97,8 @@ eviction_policy (void)
       eviction_pointer = list_begin (&frame_table);
     }
 
-    struct frame_table_entry *f = list_entry(eviction_pointer, struct frame_table_entry, elem);
-    eviction_pointer = list_next(eviction_pointer);  // advance for next iteration
+    struct frame_table_entry *f = list_entry (eviction_pointer, struct frame_table_entry, elem);
+    eviction_pointer = list_next (eviction_pointer);  // advance for next iteration
 
     if (f->pinned)
       continue;
@@ -123,9 +122,11 @@ eviction_policy (void)
   return victim;
 } 
 
-/* Find a page according to the eviction_policy, and evict it. */
-void evict_page ()
+/* Find a page according to the eviction_policy, and evict it.
+   Assumes frame table lock is held by current thread. */
+static void evict_page ()
 {
+  ASSERT (lock_held_by_current_thread (&frame_table_lock));
   struct frame_table_entry *victim = eviction_policy ();
   struct sup_page_table_entry *spte = victim->current_sup_page;
   lock_acquire (&victim->owner_thread->supplemental_page_table_lock);
@@ -136,7 +137,9 @@ void evict_page ()
   {
     // Swap out the page
     spte->page_type = PAGE_CHANGED;
+    lock_release (&frame_table_lock);
     swap_index_t swap_index = swap_out (victim->kpage_addr);
+    lock_acquire (&frame_table_lock);
 
     // Update the supplemental page table entry
     victim->current_sup_page->swap_index = swap_index;
@@ -167,24 +170,4 @@ struct frame_table_entry * find_frame_entry (void *kpage)
   
   lock_release (&frame_table_lock);
   return NULL;
-}
-
-/* Pin frame so that it can't be swapped. */
-void pin_frame(void *kpage)
-{
-  lock_acquire (&frame_table_lock);
-  struct frame_table_entry *entry = find_frame_entry (kpage);
-  if (entry != NULL)
-    entry->pinned = true;
-  lock_release (&frame_table_lock);
-}
-
-/* Unpin frame so that it can be swapped. */
-void unpin_frame (void *kpage)
-{
-  lock_acquire (&frame_table_lock);
-  struct frame_table_entry *entry = find_frame_entry (kpage);
-  if (entry != NULL)
-    entry->pinned = false;
-  lock_release (&frame_table_lock);
 }

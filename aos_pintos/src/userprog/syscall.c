@@ -74,9 +74,10 @@ void syscall_init (void)
   lock_init (&filesys_lock);
 }
 
-static bool is_valid (void *user_ptr)
+static bool is_valid (const void *user_ptr)
 {
-  if (user_ptr == NULL || is_kernel_vaddr (user_ptr)) {   
+  if (user_ptr == NULL || is_kernel_vaddr (user_ptr))
+  {   
     return false;
   }
   return true;
@@ -85,21 +86,12 @@ static bool is_valid (void *user_ptr)
 /* Check if user pointer is valid */
 static void * validate_user_pointer (const void *user_ptr)
 {
-  if (user_ptr == NULL) {          // Pointer is NULL
+  if (!is_valid (user_ptr))
     return NULL;
-  }
-  if (is_kernel_vaddr (user_ptr)) { // Pointer to kernel virtual address space
-    //printf("Kernel addr\n");
-    return NULL; 
-  }
 
+  // Return kernel virtual address, or NULL if unmapped
   struct thread *t = thread_current ();
-  void *kaddr = pagedir_get_page (t->pagedir, user_ptr); // Return kernel virtual address, or NULL if unmapped
-
-  if (kaddr == NULL) {
-    //printf("Bad mapping\n");
-  }
-
+  void *kaddr = pagedir_get_page (t->pagedir, user_ptr);
   return kaddr;
 }
 
@@ -174,7 +166,7 @@ static void syscall_handler (struct intr_frame *f)
       f->eax = symlink ((char*) ARG1, (char*) ARG2);
       return;
     default:
-      //printf ("system call %d not implemented\n", syscall_id);
+      DPRINT ("system call %d not implemented\n", syscall_id);
       thread_exit ();
   }
 }
@@ -267,18 +259,14 @@ static bool remove (const char *file)
 /* OPEN a file */
 static int open (const char *file_name)
 {
-  DPRINT ("Invalid user ptr? %s\n", file_name);
   if (validate_user_pointer (file_name) == NULL)
   {
-    DPRINT ("Invalid user ptr\n");
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
 
-  DPRINT ("Big FIle name?\n");
   if (strlen (file_name) > MAX_FILE_NAME)
   {
-    DPRINT ("Big FIle name\n");
     return -1;
   }
 
@@ -286,10 +274,8 @@ static int open (const char *file_name)
   struct file *file = filesys_open (file_name);
   lock_release (&filesys_lock);
 
-  DPRINT ("File DNE?\n");
   if (file == NULL)
   {
-    DPRINT ("File DNE %s\n", file_name);
     return -1;
   }
 
@@ -320,7 +306,7 @@ static int open (const char *file_name)
 static int filesize (int fd)
 {
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);  
-  if(file_descriptor == NULL) {
+  if (file_descriptor == NULL) {
     return -1;
   }
   

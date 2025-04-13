@@ -72,12 +72,41 @@ bool load_spte_into_frame (void *frame, struct sup_page_table_entry *spte)
   return true;
 }
 
+/* Setup supplemental entry for a file page */
+struct sup_page_table_entry *
+init_file_entry (void *upage, struct file *file, off_t offset, bool writable,
+                 uint32_t read_bytes, uint32_t zero_bytes)
+{
+  struct sup_page_table_entry *entry = malloc (sizeof (struct sup_page_table_entry));
+  if (entry == NULL)
+    return NULL;
+
+  entry->user_page = upage;
+  entry->read_bytes = read_bytes;
+  entry->zero_bytes = zero_bytes;
+  entry->file = file;
+  entry->offset = offset;
+  entry->writable = writable;
+  entry->is_swapped = false;
+
+  if (read_bytes > 0)
+  {
+    entry->page_type = PAGE_FROM_FILE;
+  }
+  else
+  {
+    entry->page_type = PAGE_ALL_ZERO;
+  }
+
+  return entry;
+}
+
 /* Setup supplemental entry for the stack */
 static struct sup_page_table_entry *
 init_stack_entry (void *upage, struct frame_table_entry *frame)
 {
   // Create supplemental page table entry
-  struct sup_page_table_entry *pte = malloc(sizeof(struct sup_page_table_entry));
+  struct sup_page_table_entry *pte = malloc (sizeof (struct sup_page_table_entry));
   if (pte == NULL)
     return NULL;
 
@@ -97,7 +126,7 @@ init_stack_entry (void *upage, struct frame_table_entry *frame)
 }
 
 /* Grow the stack at given virtual page. */
-bool grow_stack(void *virtual_page) 
+bool grow_stack (void *virtual_page) 
 {
   ASSERT (is_user_vaddr (virtual_page));
 
@@ -105,7 +134,7 @@ bool grow_stack(void *virtual_page)
   virtual_page = pg_round_down (virtual_page);
   
   // Check if we're exceeding the max stack size
-  if ((size_t)((uintptr_t) PHYS_BASE - (uintptr_t) virtual_page) >= MAX_STACK_SIZE) {
+  if (((uint32_t) PHYS_BASE - (uint32_t) virtual_page) >= MAX_STACK_SIZE) {
     return false;
   }
 
@@ -115,8 +144,9 @@ bool grow_stack(void *virtual_page)
     return false;
 
   struct sup_page_table_entry *spte = init_stack_entry (virtual_page, frame_entry);
-  if (spte == NULL) {
-    // Need to free the frame that was allocated
+  frame_entry->pinned = false;
+  if (spte == NULL)
+  {
     free_frame_entry (frame_entry);
     return NULL;
   }

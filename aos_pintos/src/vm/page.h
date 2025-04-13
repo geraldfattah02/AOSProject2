@@ -37,4 +37,8 @@ bool grow_stack (void *virtual_page);
 struct sup_page_table_entry * lookup_sup_page_entry (void *upage);
 bool load_spte_into_frame (void *frame, struct sup_page_table_entry *spte);
 
+struct sup_page_table_entry *
+init_file_entry (void *upage, struct file *file, off_t offset, bool writable,
+                 uint32_t read_bytes, uint32_t zero_bytes);
+
 void clear_current_supplemental_page_table (void);

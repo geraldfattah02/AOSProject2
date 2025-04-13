@@ -50,14 +50,13 @@ static bool parse_process_arguments (struct process_arguments *args)
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp,
-    struct process_arguments *unparsed_args);
+                  struct process_arguments *unparsed_args);
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t process_execute (const char *file_and_args)
 {
-  ASSERT(sizeof(struct process_arguments) == PGSIZE);
   struct process_arguments *args;
   tid_t tid;
 
@@ -75,8 +74,6 @@ tid_t process_execute (const char *file_and_args)
   }
 
   char *name = args->argv[0];
-  DPRINT ("name %s\n", name);
-
   struct child_thread *record = malloc (sizeof (struct child_thread));
   list_push_back (&thread_current ()->child_records, &record->elem);
   sema_init (&record->wait_child, 0);
@@ -88,7 +85,6 @@ tid_t process_execute (const char *file_and_args)
   record->loaded_successfully = false;
 
   struct file *executable = filesys_open (name);
-  DPRINT ("Exec file %p, %s\n", executable, name);
   if (executable == NULL)
   {
     palloc_free_page (args);
@@ -97,7 +93,6 @@ tid_t process_execute (const char *file_and_args)
   file_close (executable);
 
   tid = thread_create (name, PRI_DEFAULT, start_process, args, record);
-  DPRINT ("Exec tid %d\n", tid);
   if (tid == TID_ERROR)
   {
     palloc_free_page (args);
@@ -118,7 +113,7 @@ tid_t process_execute (const char *file_and_args)
    running. */
 static void start_process (void *aux)
 {
-  struct process_arguments* args = aux;
+  struct process_arguments *args = aux;
   char *file_name = args->argv[0];
   struct intr_frame if_;
   bool success;
@@ -313,7 +308,8 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
-bool load (const char *file_name, void (**eip) (void), void **esp, struct process_arguments *args)
+bool load (const char *file_name, void (**eip) (void), void **esp,
+           struct process_arguments *args)
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -483,7 +479,6 @@ static bool validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
 
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
-   /*Edite this function to load segment to supp page table*/
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable)
@@ -500,43 +495,18 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
-      struct sup_page_table_entry *kpage = malloc(sizeof(struct sup_page_table_entry));
-      if (kpage == NULL)
-        return false;
-
-      kpage->user_page = upage; //virtual page address
-      kpage->read_bytes = page_read_bytes;
-      kpage->zero_bytes = page_zero_bytes;
-      kpage->file = file;
-      kpage->offset = ofs;
-      kpage->writable = writable;
-      kpage->is_swapped = false;
-
-      if(page_read_bytes == PGSIZE){
-        //entire page is demand-paged from the file
-        kpage->page_type = PAGE_FROM_FILE;
-        kpage->zero_bytes = 0;
-      }
-      else if(page_read_bytes == PGSIZE){
-        //entire page is zeroed
-        kpage->page_type = PAGE_ALL_ZERO;
-      }
-      else{
-        //part of page is from file, part is zeroed
-        kpage->page_type = PAGE_FROM_FILE;
-      }
+      /* Setup a virtual memory page. */
+      struct sup_page_table_entry *entry =
+        init_file_entry (upage, file, ofs, writable, page_read_bytes, page_zero_bytes);
 
       struct thread *current = thread_current ();
-      lock_acquire(&current->supplemental_page_table_lock);
-      //printf("Creating page %p\n", kpage->user_page);
-      list_push_back(&current->supplemental_page_table, &kpage->elem);
-      lock_release(&current->supplemental_page_table_lock);
+      lock_acquire (&current->supplemental_page_table_lock);
+      list_push_back (&current->supplemental_page_table, &entry->elem);
+      lock_release (&current->supplemental_page_table_lock);
         
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
-      DPRINT ("Load segment at upage %p\n", upage);
       upage += PGSIZE;
       ofs += PGSIZE;
     }
@@ -551,7 +521,7 @@ struct argument {
 };
 
 /* Push a string value onto the stack and add to argument list */
-static char *push_string (char **esp, const char *value)
+static char * push_string (char **esp, const char *value)
 {
   uint32_t len = strlen (value) + 1;
   *esp -= len;
@@ -601,20 +571,19 @@ static bool pass_arguments (char **esp, struct process_arguments *args)
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
-static bool setup_stack(void **esp, struct process_arguments *args)
+static bool setup_stack (void **esp, struct process_arguments *args)
 {
   // Calculate the address for the stack page (one page below PHYS_BASE)
   void *stack_page = ((uint8_t *)PHYS_BASE) - PGSIZE;
   
   // Call the grow_stack_one_page function to allocate and map the page
-  if (!grow_stack(stack_page))
+  if (!grow_stack (stack_page))
     return false;
 
   // Set initial stack pointer to the top of user memory
   *esp = PHYS_BASE;
   
   // Now load arguments onto the stack
-  DPRINT ("args %s\n", &args->arg_strings);
   pass_arguments ((char**) esp, args);
   
   return true;

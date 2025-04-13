@@ -6,7 +6,8 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "vm/page.h"
-#include "threads/vaddr.h" // For PGSIZE
+#include "threads/vaddr.h"
+
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
@@ -112,7 +113,6 @@ static void kill (struct intr_frame *f)
 
 bool stack_heuristic (void *user_addr, void *esp)
 {
-  DPRINT ("%p, %p\n", user_addr, esp);
   return (uint32_t*) user_addr >= (uint32_t*) esp - 32
       && (uint32_t*) user_addr <  (uint32_t*) PHYS_BASE
       && (uint32_t*) user_addr >= (uint32_t*) PHYS_BASE - MAX_STACK_SIZE;
@@ -160,12 +160,12 @@ static void page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
   
-  bool accessingStack = false;
+  bool accessing_stack = false;
 
   //Check if the faulting address is accessing the stack
   if (stack_heuristic (fault_addr, f->esp))
   {
-    accessingStack = true;
+    accessing_stack = true;
   }
   DPRINT ("Page Fault occured for %p\n", fault_addr);
 
@@ -181,7 +181,7 @@ static void page_fault (struct intr_frame *f)
     if (spte == NULL)
     {
       /* Trying to access a page with no stpe */
-      if (!accessingStack)
+      if (!accessing_stack)
       {
         DPRINT ("Page not found, not part of stack.\n");
         kill (f);
@@ -201,15 +201,17 @@ static void page_fault (struct intr_frame *f)
   
     struct frame_table_entry *frame = allocate_frame (PAL_USER);
 
-    if(!load_spte_into_frame (frame->kpage_addr, spte))
+    if (!load_spte_into_frame (frame->kpage_addr, spte))
     {
-      DPRINT ("Failed load file\n");
+      frame->pinned = false;
+      DPRINT ("Failed loading spte\n");
       free_frame_entry (frame);
       kill (f);
       return;
     }
 
     frame->current_sup_page = spte;
+    frame->pinned = false;
     return;
   }
   else

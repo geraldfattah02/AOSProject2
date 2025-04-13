@@ -128,7 +128,7 @@ int main (void)
   filesys_init (format_filesys);
 #endif
 
-  swap_init();
+  swap_init ();
 
   printf ("Boot complete.\n");
 
