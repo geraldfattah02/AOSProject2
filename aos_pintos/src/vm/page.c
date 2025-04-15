@@ -103,14 +103,12 @@ init_file_entry (void *upage, struct file *file, off_t offset, bool writable,
 
 /* Setup supplemental entry for the stack */
 static struct sup_page_table_entry *
-init_stack_entry (void *upage, struct frame_table_entry *frame)
+init_stack_entry (void *upage)
 {
   // Create supplemental page table entry
   struct sup_page_table_entry *pte = malloc (sizeof (struct sup_page_table_entry));
   if (pte == NULL)
     return NULL;
-
-  frame->current_sup_page = pte;
 
   // Setup the supplemental page table entry
   pte->user_page = upage;
@@ -123,6 +121,16 @@ init_stack_entry (void *upage, struct frame_table_entry *frame)
   pte->is_swapped = false;
 
   return pte;
+}
+
+void add_stack_entry (void *upage)
+{
+  struct sup_page_table_entry *spte = init_stack_entry (upage);
+
+  struct thread *current = thread_current ();
+  lock_acquire (&current->supplemental_page_table_lock);
+  list_push_back (&current->supplemental_page_table, &spte->elem);
+  lock_release (&current->supplemental_page_table_lock);
 }
 
 /* Grow the stack at given virtual page. */
@@ -143,13 +151,15 @@ bool grow_stack (void *virtual_page)
   if (frame_entry == NULL)
     return false;
 
-  struct sup_page_table_entry *spte = init_stack_entry (virtual_page, frame_entry);
-  frame_entry->pinned = false;
+  struct sup_page_table_entry *spte = init_stack_entry (virtual_page);
   if (spte == NULL)
   {
     free_frame_entry (frame_entry);
     return NULL;
   }
+
+  frame_entry->current_sup_page = spte;
+  frame_entry->pinned = false;
 
   // Map the physical frame to the virtual page
   if (!install_page (virtual_page, frame_entry->kpage_addr, true))

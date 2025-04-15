@@ -33,6 +33,7 @@ struct sup_page_table_entry {
 };
 
 bool install_page (void *upage, void *kpage, bool writable);
+void add_stack_entry (void *upage);
 bool grow_stack (void *virtual_page);
 struct sup_page_table_entry * lookup_sup_page_entry (void *upage);
 bool load_spte_into_frame (void *frame, struct sup_page_table_entry *spte);

@@ -137,9 +137,11 @@ static void evict_page ()
   {
     // Swap out the page
     spte->page_type = PAGE_CHANGED;
+    victim->pinned = true;
     lock_release (&frame_table_lock);
     swap_index_t swap_index = swap_out (victim->kpage_addr);
     lock_acquire (&frame_table_lock);
+    victim->pinned = false;
 
     // Update the supplemental page table entry
     victim->current_sup_page->swap_index = swap_index;

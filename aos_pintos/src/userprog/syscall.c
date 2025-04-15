@@ -336,13 +336,7 @@ static int read (int fd, void *buffer, unsigned size, void *esp)
   void *kaddr = pagedir_get_page (thread->pagedir, buffer);
   if (kaddr == NULL && is_stack)
   {
-    if (!grow_stack (upage))
-    {
-      set_exit_code (thread_current (), -1);
-      thread_exit ();
-    }
-    kaddr = pagedir_get_page (thread->pagedir, buffer);
-    ASSERT (kaddr != NULL);
+    add_stack_entry (upage);
   }
   
   // Get supplemental page entry.
@@ -371,7 +365,7 @@ static int read (int fd, void *buffer, unsigned size, void *esp)
     struct sup_page_table_entry *spte = lookup_sup_page_entry (upage); 
     if (spte == NULL)
     {
-      grow_stack (upage);
+      add_stack_entry (upage);
     }
   }
 
