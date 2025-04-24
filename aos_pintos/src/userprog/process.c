@@ -18,30 +18,62 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/malloc.h"
+#include "vm/page.h"
+
+#define MAX_ARG_LEN ((PGSIZE / 4) * 3) /* Allow up to 3Kb */
+#define MAX_ARGC (((PGSIZE / 4) - sizeof(uint32_t)) / sizeof (char*))
+struct process_arguments {
+  char arg_strings[MAX_ARG_LEN]; 
+  char *argv[MAX_ARGC];
+  uint32_t argc;
+};
+
+/* Break argument string into argv and argc */
+static bool parse_process_arguments (struct process_arguments *args)
+{
+  char *token, *save_ptr;
+  uint32_t i = 0;
+  for (token = strtok_r (args->arg_strings, " ", &save_ptr);
+       token != NULL;
+       token = strtok_r (NULL, " ", &save_ptr))
+  {
+    if (i >= MAX_ARGC)
+    {
+      return false;
+    }
+    args->argv[i++] = token;
+  }
+  args->argc = i;
+  return true;
+}
+
 
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp, char *unparsed_args);
-
+static bool load (const char *cmdline, void (**eip) (void), void **esp,
+                  struct process_arguments *unparsed_args);
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t process_execute (const char *file_and_args)
 {
-  char *fn_copy;
+  struct process_arguments *args;
   tid_t tid;
 
-  /* Make a copy of FILE_NAME.
+  /* Make a copy of file name and args.
      Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  args = palloc_get_page (0);
+  if (args == NULL)
     return TID_ERROR;
 
-  strlcpy (fn_copy, file_and_args, PGSIZE);
+  strlcpy ((char*) args, file_and_args, MAX_ARG_LEN);
+  if (!parse_process_arguments (args))
+  {
+    palloc_free_page (args);
+    return TID_ERROR;
+  }
 
-  char *file_name, *unparsed_args;
-  file_name = strtok_r (file_and_args, " ", &unparsed_args);
-
+  char *name = args->argv[0];
   struct child_thread *record = malloc (sizeof (struct child_thread));
   list_push_back (&thread_current ()->child_records, &record->elem);
   sema_init (&record->wait_child, 0);
@@ -52,17 +84,18 @@ tid_t process_execute (const char *file_and_args)
   record->should_free = false;
   record->loaded_successfully = false;
 
-  struct file *executable = filesys_open (file_name);
+  struct file *executable = filesys_open (name);
   if (executable == NULL)
   {
+    palloc_free_page (args);
     return TID_ERROR;
   }
   file_close (executable);
 
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy, record);
+  tid = thread_create (name, PRI_DEFAULT, start_process, args, record);
   if (tid == TID_ERROR)
   {
-    palloc_free_page (fn_copy);
+    palloc_free_page (args);
     return TID_ERROR;
   }
 
@@ -78,11 +111,10 @@ tid_t process_execute (const char *file_and_args)
 
 /* A thread function that loads a user process and starts it
    running. */
-static void start_process (void *file_and_args)
+static void start_process (void *aux)
 {
-  char *file_name, *unparsed_args;
-  file_name = strtok_r (file_and_args, " ", &unparsed_args);
-
+  struct process_arguments *args = aux;
+  char *file_name = args->argv[0];
   struct intr_frame if_;
   bool success;
 
@@ -92,7 +124,7 @@ static void start_process (void *file_and_args)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   
-  success = load (file_name, &if_.eip, &if_.esp, unparsed_args);
+  success = load (file_name, &if_.eip, &if_.esp, args);
 
   if (success)
   {
@@ -117,7 +149,7 @@ static void start_process (void *file_and_args)
   }
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
+  palloc_free_page (aux);
   if (!success)
     thread_exit ();
 
@@ -143,7 +175,7 @@ static void start_process (void *file_and_args)
 int process_wait (tid_t child_tid)
 {
   struct list_elem *e;
-  struct child_thread *child;
+  struct child_thread *child = NULL;
   struct list *list = &thread_current ()->child_records;
   for (e = list_begin (list); e != list_end (list); e = list_next (e))
   {
@@ -266,7 +298,7 @@ struct Elf32_Phdr
 #define PF_W 2 /* Writable. */
 #define PF_R 4 /* Readable. */
 
-static bool setup_stack (void **esp, char *file_name, char *args);
+static bool setup_stack (void **esp, struct process_arguments *args);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -276,7 +308,8 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
-bool load (const char *file_name, void (**eip) (void), void **esp, char *unparsed_args)
+bool load (const char *file_name, void (**eip) (void), void **esp,
+           struct process_arguments *args)
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -370,7 +403,7 @@ bool load (const char *file_name, void (**eip) (void), void **esp, char *unparse
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp, file_name, unparsed_args))
+  if (!setup_stack (esp, args))
     goto done;
 
   /* Start address. */
@@ -386,7 +419,7 @@ done:
 
 /* load() helpers. */
 
-static bool install_page (void *upage, void *kpage, bool writable);
+bool install_page (void *upage, void *kpage, bool writable);
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
@@ -454,7 +487,6 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
-  file_seek (file, ofs);
   while (read_bytes > 0 || zero_bytes > 0)
     {
       /* Calculate how to fill this page.
@@ -463,31 +495,22 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
-        return false;
+      /* Setup a virtual memory page. */
+      struct sup_page_table_entry *entry =
+        init_file_entry (upage, file, ofs, writable, page_read_bytes, page_zero_bytes);
 
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          palloc_free_page (kpage);
-          return false;
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable))
-        {
-          palloc_free_page (kpage);
-          return false;
-        }
-
+      struct thread *current = thread_current ();
+      lock_acquire (&current->supplemental_page_table_lock);
+      list_push_back (&current->supplemental_page_table, &entry->elem);
+      lock_release (&current->supplemental_page_table_lock);
+        
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      ofs += PGSIZE;
     }
+  file_seek (file, ofs);
   return true;
 }
 
@@ -498,102 +521,72 @@ struct argument {
 };
 
 /* Push a string value onto the stack and add to argument list */
-static bool push_string (char **esp, struct list *args, char *value)
+static char * push_string (char **esp, const char *value)
 {
-  struct argument *arg = malloc (sizeof (struct argument));
-  if (arg == NULL)
-  {
-    return false;
-  }
-
   uint32_t len = strlen (value) + 1;
-
   *esp -= len;
   memcpy (*esp, value, len);
-  arg->addr = *esp;
-  
-  list_push_front (args, &arg->elem);
-  return true;
+  return *esp;
 }
 
 /* Push a 4 byte value onto the stack */
-static void push_4byte(uint32_t** esp, uint32_t value)
+static void push_4byte(char **stack, uint32_t value)
 {
+  uint32_t **esp = (uint32_t**) stack;
   *esp -= 1;
   **esp = value;
 }
 
 /* Push arguments on the stack and setup argc, argv */
-static bool pass_arguments (char **esp, char *file_name, char *unparsed_args)
+static bool pass_arguments (char **esp, struct process_arguments *args)
 {
-  struct list args;
-  list_init (&args);
-
-  bool success = push_string (esp, &args, file_name);
-  if (!success)
-    return false;
-
-  char *token, *save_ptr;
-  for (token = strtok_r (unparsed_args, " ", &save_ptr);
-       token != NULL;
-       token = strtok_r (NULL, " ", &save_ptr))
+  for (uint32_t i = 0; i < args->argc; i++)
   {
-    bool success = push_string (esp, &args, token);
-    if (!success)
-      return false;
+    args->argv[i] = push_string (esp, args->argv[i]);
   }
 
   // 4-byte word alignment 
   *esp -= ((uint32_t) *esp) % 4;
 
   // Add NULL sentinel
-  push_4byte (esp, NULL);
+  push_4byte (esp, 0);
 
-  // Add arguments
-  int argc = 0;
-  while (!list_empty (&args))
+  // Push arg addresses (in reverse)
+  for (int i = (int) args->argc - 1; i >= 0; i--)
   {
-    struct list_elem *e = list_pop_front (&args);
-    struct argument *arg = list_entry (e, struct argument, elem);
-
-    push_4byte (esp, arg->addr);
-    argc += 1;
-
-    free (arg);
+    push_4byte (esp, (uint32_t) args->argv[i]);
   }
 
   // Add argv
-  push_4byte (esp, *esp);
+  push_4byte (esp, (uint32_t) *esp);
 
   // Add argc
-  push_4byte (esp, argc);
+  push_4byte (esp, args->argc);
 
   // Add empty return address
-  push_4byte (esp, NULL);
+  push_4byte (esp, 0);
 
   return true;
 }
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
-static bool setup_stack (void **esp, char *file_name, char *args)
+static bool setup_stack (void **esp, struct process_arguments *args)
 {
-  uint8_t *kpage;
-  bool success = false;
+  // Calculate the address for the stack page (one page below PHYS_BASE)
+  void *stack_page = ((uint8_t *)PHYS_BASE) - PGSIZE;
+  
+  // Call the grow_stack_one_page function to allocate and map the page
+  if (!grow_stack (stack_page))
+    return false;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL)
-    {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-      {
-        *esp = PHYS_BASE;
-        pass_arguments (esp, file_name, args);
-      }
-      else
-        palloc_free_page (kpage);
-    }
-  return success;
+  // Set initial stack pointer to the top of user memory
+  *esp = PHYS_BASE;
+  
+  // Now load arguments onto the stack
+  pass_arguments ((char**) esp, args);
+  
+  return true;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
@@ -605,7 +598,7 @@ static bool setup_stack (void **esp, char *file_name, char *args)
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
-static bool install_page (void *upage, void *kpage, bool writable)
+bool install_page (void *upage, void *kpage, bool writable)
 {
   struct thread *t = thread_current ();
 

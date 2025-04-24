@@ -17,6 +17,7 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+#include "vm/page.h"
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -293,6 +294,9 @@ void thread_exit (void)
 {
   ASSERT (!intr_context ());
 
+  // Process Exit sets the pagedir to NULL, so must clear entries now.
+  clear_current_supplemental_page_table ();
+
 #ifdef USERPROG
   process_exit ();
 #endif
@@ -482,6 +486,8 @@ static void init_thread (struct thread *t, const char *name, int priority)
 
   list_init (&t->child_records);
   list_init (&t->file_descriptors);
+  list_init (&t->supplemental_page_table);
+  lock_init (&t->supplemental_page_table_lock);
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -591,6 +597,13 @@ static tid_t allocate_tid (void)
   lock_release (&tid_lock);
 
   return tid;
+}
+
+/* Set a thread's status code */
+void set_exit_code (struct thread *t, int code)
+{
+  if (t->parent_record != NULL)
+    t->parent_record->exit_code = code;
 }
 
 /* Offset of `stack' member within `struct thread'.

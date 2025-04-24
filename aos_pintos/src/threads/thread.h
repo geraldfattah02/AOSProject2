@@ -120,6 +120,9 @@ struct thread
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
+
+  struct list supplemental_page_table;      /* Supplemental page table */
+  struct lock supplemental_page_table_lock; /* Lock for the sup page table */
 };
 
 /* If false (default), use round-robin scheduler.
@@ -157,5 +160,8 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+/* Set a thread's status code */
+void set_exit_code (struct thread *t, int code);
 
 #endif /* threads/thread.h */
