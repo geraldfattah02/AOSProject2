@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -18,6 +19,18 @@ enum thread_status
    You can redefine this to whatever type you like. */
 typedef int tid_t;
 #define TID_ERROR ((tid_t) -1) /* Error value for tid_t. */
+
+/* Record of child thread information, stored in the parent thread */
+struct child_thread
+{
+   tid_t tid;                     /* Thread ID of child thread */
+   int exit_code;                 /* Stores child exit code */
+   struct semaphore wait_child;   /* Used by parent to wait for the child */
+   struct list_elem elem;         /* List element */
+   bool loaded_successfully;      /* Track if executable file loaded */
+   bool should_free;              /* Indicates if the child should free this */
+   struct lock free_lock;         /* Lock for concurrent accesses to should_free */
+};
 
 /* Thread priorities. */
 #define PRI_MIN 0      /* Lowest priority. */
@@ -97,11 +110,19 @@ struct thread
 
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
-  uint32_t *pagedir; /* Page directory. */
+  uint32_t *pagedir;                   /* Page directory. */
+  struct list child_records;           /* List of child_thread records */
+  struct child_thread *parent_record;  /* Pointer to this thread's child_thread 
+                                          record, stored in the parent thread. */
+  struct list file_descriptors;        /* List of open file descriptors */
+  struct file *executable;             /* Current process executable file */
 #endif
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
+
+  struct list supplemental_page_table;      /* Supplemental page table */
+  struct lock supplemental_page_table_lock; /* Lock for the sup page table */
 };
 
 /* If false (default), use round-robin scheduler.
@@ -116,7 +137,7 @@ void thread_tick (void);
 void thread_print_stats (void);
 
 typedef void thread_func (void *aux);
-tid_t thread_create (const char *name, int priority, thread_func *, void *);
+tid_t thread_create (const char *name, int priority, thread_func *, void *, struct child_thread *);
 
 void thread_block (void);
 void thread_unblock (struct thread *);
@@ -139,5 +160,8 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+/* Set a thread's status code */
+void set_exit_code (struct thread *t, int code);
 
 #endif /* threads/thread.h */

@@ -11,9 +11,13 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/malloc.h"
+#include "../filesys/file.h"
+#include "userprog/syscall.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+#include "vm/page.h"
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -106,7 +110,7 @@ void thread_start (void)
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
-  thread_create ("idle", PRI_MIN, idle, &idle_started);
+  thread_create ("idle", PRI_MIN, idle, &idle_started, NULL);
 
   /* Start preemptive thread scheduling. */
   intr_enable ();
@@ -159,7 +163,7 @@ void thread_print_stats (void)
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
 tid_t thread_create (const char *name, int priority, thread_func *function,
-                     void *aux)
+                     void *aux, struct child_thread *parent_record)
 {
   struct thread *t;
   struct kernel_thread_frame *kf;
@@ -177,6 +181,13 @@ tid_t thread_create (const char *name, int priority, thread_func *function,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+
+  t->parent_record = parent_record;
+  if (parent_record != NULL)
+  {
+    parent_record->tid = tid;
+    parent_record->exit_code = 0;
+  }
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -259,15 +270,59 @@ struct thread *thread_current (void)
 /* Returns the running thread's tid. */
 tid_t thread_tid (void) { return thread_current ()->tid; }
 
+/* Check if the record has been flagged for deletion,
+   and should be freed by the remaining child/parent.
+   Otherwise, mark it for deletion. */
+static void mark_or_free_record (struct child_thread *record)
+{
+  lock_acquire (&record->free_lock);
+  if (record->should_free)
+  {
+    lock_release (&record->free_lock);
+    free (record);
+  }
+  else
+  {
+    record->should_free = true;
+    lock_release (&record->free_lock);
+  }
+}
+
 /* Deschedules the current thread and destroys it.  Never
    returns to the caller. */
 void thread_exit (void)
 {
   ASSERT (!intr_context ());
 
+  // Process Exit sets the pagedir to NULL, so must clear entries now.
+  clear_current_supplemental_page_table ();
+
 #ifdef USERPROG
   process_exit ();
 #endif
+
+  free_thread_resources (thread_current ());
+
+  struct child_thread *parent = thread_current ()->parent_record;
+  if (parent != NULL)
+  {
+    printf ("%s: exit(%d)\n", thread_current ()->name, parent->exit_code);
+    sema_up (&parent->wait_child);
+    mark_or_free_record (parent);
+  }
+  else {
+    printf ("%s: exit(%d)\n", thread_current ()->name, 0);
+  }
+
+  struct child_thread *child;
+  struct list *list = &thread_current ()->child_records;
+  while (!list_empty (list))
+  {
+    child = list_entry (list_pop_back (list), struct child_thread, elem);
+    list_remove (&child->elem);
+
+    mark_or_free_record (child);
+  }
 
   /* Remove thread from all threads list, set our status to dying,
      and schedule another process.  That process will destroy us
@@ -429,6 +484,11 @@ static void init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 
+  list_init (&t->child_records);
+  list_init (&t->file_descriptors);
+  list_init (&t->supplemental_page_table);
+  lock_init (&t->supplemental_page_table_lock);
+
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
@@ -537,6 +597,13 @@ static tid_t allocate_tid (void)
   lock_release (&tid_lock);
 
   return tid;
+}
+
+/* Set a thread's status code */
+void set_exit_code (struct thread *t, int code)
+{
+  if (t->parent_record != NULL)
+    t->parent_record->exit_code = code;
 }
 
 /* Offset of `stack' member within `struct thread'.

@@ -1,9 +1,12 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdint.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "vm/page.h"
+#include "threads/vaddr.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -73,6 +76,12 @@ static void kill (struct intr_frame *f)
      exceptions back to the process via signals, but we don't
      implement them. */
 
+  /* When a thread is killed by the kernel, set the exit code to -1 */
+  if (thread_current ()->parent_record)
+  {
+    thread_current ()->parent_record->exit_code = -1;
+  }
+
   /* The interrupt frame's code segment value tells us where the
      exception originated. */
   switch (f->cs)
@@ -102,6 +111,13 @@ static void kill (struct intr_frame *f)
     }
 }
 
+bool stack_heuristic (void *user_addr, void *esp)
+{
+  return (uint32_t*) user_addr >= (uint32_t*) esp - 32
+      && (uint32_t*) user_addr <  (uint32_t*) PHYS_BASE
+      && (uint32_t*) user_addr >= (uint32_t*) PHYS_BASE - MAX_STACK_SIZE;
+}
+
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
@@ -119,6 +135,9 @@ static void page_fault (struct intr_frame *f)
   bool write;       /* True: access was write, false: access was read. */
   bool user;        /* True: access by user, false: access by kernel. */
   void *fault_addr; /* Fault address. */
+
+  (void) user;
+  (void) write;
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -140,15 +159,65 @@ static void page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+  
+  bool accessing_stack = false;
+
+  //Check if the faulting address is accessing the stack
+  if (stack_heuristic (fault_addr, f->esp))
+  {
+    accessing_stack = true;
+  }
+  DPRINT ("Page Fault occured for %p\n", fault_addr);
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading", user ? "user" : "kernel");
+   
+  if (not_present && is_user_vaddr (fault_addr))
+  {
+    void *upage = pg_round_down (fault_addr);
+    struct sup_page_table_entry *spte = lookup_sup_page_entry (upage);
 
-  printf ("There is no crying in Pintos!\n");
+    if (spte == NULL)
+    {
+      /* Trying to access a page with no stpe */
+      if (!accessing_stack)
+      {
+        DPRINT ("Page not found, not part of stack.\n");
+        kill (f);
+        return;
+      }
 
-  kill (f);
+      if (!grow_stack (upage))
+      {
+        DPRINT ("Failed to grow stack.\n");
+        kill (f);
+        return;
+      }
+
+      /* Stack growth successful, return to thread. */
+      return;
+    }
+  
+    struct frame_table_entry *frame = allocate_frame (PAL_USER);
+
+    if (!load_spte_into_frame (frame->kpage_addr, spte))
+    {
+      frame->pinned = false;
+      DPRINT ("Failed loading spte\n");
+      free_frame_entry (frame);
+      kill (f);
+      return;
+    }
+
+    frame->current_sup_page = spte;
+    frame->pinned = false;
+    return;
+  }
+  else
+  {
+    DPRINT ("Fatal Page Fault occured for %p, killing thread.\n", fault_addr);
+    kill (f);
+    return;
+  }
 }
