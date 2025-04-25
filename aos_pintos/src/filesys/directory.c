@@ -5,6 +5,7 @@
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
 #include "threads/malloc.h"
+#include "filesys/free-map.h"
 
 /* A directory. */
 struct dir
@@ -39,6 +40,78 @@ bool dir_create (block_sector_t sector, size_t entry_cnt, block_sector_t parent)
   inode_write_at (node, &files, 2 * sizeof (struct dir_entry), 0);
   inode_close (node);
   return success;
+}
+
+bool dir_create_from_path (const char *syscall_path, struct dir* working_directory) {
+  DPRINT("Creating dir %s\n", syscall_path);
+  block_sector_t sector;
+  bool success = free_map_allocate (1, &sector);
+  if (!success) {
+    free_map_release (sector, 1);
+    return false;
+  }
+
+  char *path = malloc(strlen(syscall_path) + 1);
+  if (!path) {
+    DPRINT("Failed to allocate path\n");
+    free_map_release (sector, 1);
+    return false;
+  }
+  strlcpy (path, syscall_path, strlen(syscall_path) + 1);
+
+  bool should_close = false;
+  struct dir *current_dir = working_directory;
+  if (syscall_path[0] == '/') {
+    current_dir = dir_open_root ();
+    should_close = true;
+  }
+
+  struct inode *node = NULL;
+  char *token, *save_ptr;
+  for (token = strtok_r (path, "/", &save_ptr);
+       token != NULL;
+       token = strtok_r (NULL, "/", &save_ptr))
+  {
+    DPRINT("Token %s\n", token);
+    if (strlen(token) == 0) {
+      continue;
+    }
+    success = dir_lookup (current_dir, token, &node);
+    if (!success) {
+      DPRINT("DIR %s not found\n", token);
+      break;
+    }
+    current_dir = dir_open (node);
+    should_close = true;
+  }
+  block_sector_t parent = inode_get_inumber (dir_get_inode(current_dir));
+  DPRINT("parent %d\n", parent);
+  
+  if (success) { // Full path was found, directory exists
+    DPRINT("Full dir path exists\n");
+    if (should_close) {
+      dir_close (current_dir);
+    }
+    free (path);
+    return false;
+  }
+  if (token == NULL || strtok_r (NULL, "/", &save_ptr) != NULL) {
+    DPRINT("Remaining token %s\n", token);
+    if (should_close) {
+      dir_close (current_dir);
+    }
+    free (path);
+    return false; // Not the last name in the path
+  }
+
+  dir_create (sector, 0, parent);
+  dir_add (current_dir, token, sector);
+
+  if (should_close) {
+    dir_close (current_dir);
+  }
+  free (path);
+  return true;
 }
 
 /* Opens and returns the directory for the given INODE, of which

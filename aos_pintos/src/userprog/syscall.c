@@ -17,6 +17,9 @@
 #include "userprog/exception.h"
 #include "devices/input.h"
 #include "devices/shutdown.h"
+#include "filesys/directory.h"
+#include "filesys/free-map.h"
+#include "filesys/inode.h"
 
 #define MAX_FILE_NAME 14
 
@@ -64,6 +67,13 @@ static void seek (int fd, unsigned position);
 static unsigned tell (int fd);
 static void close (int fd);
 static int symlink (char *target, char *linkpath);
+
+static bool chdir (const char *dir);
+static bool mkdir (const char *dir);
+static bool readdir (int fd, char *name);
+static bool isdir (int fd);
+static int inumber (int fd);
+static int stat (char *pathname, void *buf); 
 
 /* Initialize syscall */
 static void syscall_handler (struct intr_frame *);
@@ -130,19 +140,19 @@ static void syscall_handler (struct intr_frame *f)
       exit (ARG1);
       return;
     case SYS_EXEC:
-      f->eax = exec ((const char *) ARG1);
+      f->eax = exec ((const char*) ARG1);
       return;
     case SYS_WAIT:
       f->eax = wait (ARG1);
       return;
     case SYS_CREATE:
-      f->eax = create ((const char *) ARG1, ARG2);
+      f->eax = create ((const char*) ARG1, ARG2);
       return;
     case SYS_REMOVE:
-      f->eax = remove ((const char *) ARG1);
+      f->eax = remove ((const char*) ARG1);
       return;
     case SYS_OPEN:
-      f->eax = open ((const char *) ARG1);
+      f->eax = open ((const char*) ARG1);
       return;
     case SYS_FILESIZE:
       f->eax = filesize (ARG1);
@@ -164,6 +174,24 @@ static void syscall_handler (struct intr_frame *f)
       return;
     case SYS_SYMLINK:
       f->eax = symlink ((char*) ARG1, (char*) ARG2);
+      return;
+    case SYS_CHDIR:
+      f->eax = chdir ((const char*) ARG1);
+      return;
+    case SYS_MKDIR:
+      f->eax = mkdir ((const char*) ARG1);
+      return;
+    case SYS_READDIR:
+      f->eax = readdir (ARG1, (char*) ARG2);
+      return;
+    case SYS_ISDIR:
+      f->eax = isdir (ARG1);
+      return;
+    case SYS_INUMBER:
+      f->eax = inumber (ARG1);
+      return;
+    case SYS_STAT:
+      f->eax = stat ((char*) ARG1, (void*) ARG2);
       return;
     default:
       DPRINT ("system call %d not implemented\n", syscall_id);
@@ -229,7 +257,11 @@ static bool create (const char *file, unsigned initial_size)
   }
 
   lock_acquire (&filesys_lock);
-  bool success = filesys_create (file, initial_size);
+  if (thread_current ()->working_directory == NULL) {
+    DPRINT("NULL directory!");
+    thread_current ()->working_directory = dir_open_root ();
+  }
+  bool success =  filesys_create_from_path (file, thread_current ()->working_directory, initial_size);
   lock_release (&filesys_lock);
 
   return success;
@@ -515,4 +547,56 @@ void free_thread_resources (struct thread *t)
     }
 
   lock_release (&filesys_lock);
+}
+
+bool chdir (const char *dir)
+{
+  DPRINT ("Not implemented :( \n");
+  return false;
+}
+
+bool mkdir (const char *dir)
+{
+  if (validate_user_pointer (dir) == NULL)
+  {
+    set_exit_code (thread_current (), -1);
+    thread_exit ();
+  }
+
+  if (strlen (dir) == 0)
+  {
+    return false;
+  }
+
+  if (thread_current ()->working_directory == NULL) {
+    DPRINT("NULL directory!");
+    thread_current ()->working_directory = dir_open_root ();
+  }
+  bool success = dir_create_from_path (dir, thread_current ()->working_directory);
+
+  return success;
+}
+
+bool readdir (int fd, char *name)\
+{
+  DPRINT ("Not implemented :( \n");
+  return false;
+}
+
+bool isdir (int fd)
+{
+  DPRINT ("Not implemented :( \n");
+  return false;
+}
+
+int inumber (int fd)
+{
+  DPRINT ("Not implemented :( \n");
+  return 0;
+}
+
+int stat (char *pathname, void *buf)
+{
+  DPRINT ("Not implemented :( \n");
+  return 0;
 }
