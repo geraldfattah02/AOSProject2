@@ -22,10 +22,10 @@ struct inode_disk
   off_t length;         /* File size in bytes. */
   unsigned magic;       /* Magic number. */
   bool is_symlink;      /* True if symbolic link, false otherwise. */
+  bool is_dir; //used to check if inode is bening used for directory
   block_sector_t direct_map[DIRECT_BLOCKS];
   block_sector_t indirect_block;
   block_sector_t doubly_indirect;
-  bool is_dir; //used to check if inode is bening used for directory
 };
 
 bool inode_allocate(size_t sectors, struct inode_disk *disk_inode);
