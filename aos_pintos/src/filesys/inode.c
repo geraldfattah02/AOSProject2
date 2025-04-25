@@ -24,6 +24,7 @@ struct inode_disk
   block_sector_t direct_map[DIRECT_BLOCKS];
   block_sector_t indirect_block;
   block_sector_t doubly_indirect;
+  bool is_dir; //used to check if inode is bening used for directory
 };
 
 bool inode_allocate(size_t sectors, struct inode_disk *disk_inode);
@@ -178,7 +179,7 @@ void inode_init (void) { list_init (&open_inodes); }
    device.
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
-bool inode_create (block_sector_t sector, off_t length)
+bool inode_create (block_sector_t sector, off_t length, bool is_dir)
 {
   struct inode_disk *disk_inode = NULL;
   bool success = false;
@@ -196,7 +197,8 @@ bool inode_create (block_sector_t sector, off_t length)
       disk_inode->length = length;
       disk_inode->magic = INODE_MAGIC;
       disk_inode->is_symlink = false;
-
+      disk_inode->is_dir = is_dir;
+      //free_map_allocate (sectors, &disk_inode->start)
       if (inode_allocate(sectors, disk_inode))
         {
           block_write (fs_device, sector, disk_inode);
