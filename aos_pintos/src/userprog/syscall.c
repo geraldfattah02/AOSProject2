@@ -450,6 +450,10 @@ static int write (int fd, const void *buffer, unsigned size)
   {
     return 0;
   }
+
+  if (inode_is_dir (file_descriptor->file->inode)) {
+    return -1;
+  }
   
   lock_acquire (&filesys_lock);
   off_t bytes_written = file_write (file_descriptor->file, buffer, size);
@@ -551,8 +555,15 @@ void free_thread_resources (struct thread *t)
 
 bool chdir (const char *dir)
 {
-  DPRINT ("Not implemented :( \n");
-  return false;
+  if (!thread_current ()->working_directory) {
+    thread_current ()->working_directory = dir_open_root ();
+  }
+  struct dir *open_dir = get_directory_from_path (dir, thread_current ()->working_directory);
+  if (open_dir == NULL) {
+    return false;
+  }
+  thread_current ()->working_directory = open_dir;
+  return true;
 }
 
 bool mkdir (const char *dir)
@@ -591,8 +602,13 @@ bool isdir (int fd)
 
 int inumber (int fd)
 {
-  DPRINT ("Not implemented :( \n");
-  return 0;
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (file_descriptor == NULL)
+  {
+    return 0;
+  }
+  block_sector_t inumber = inode_get_inumber (file_descriptor->file->inode);
+  return inumber;
 }
 
 int stat (char *pathname, void *buf)

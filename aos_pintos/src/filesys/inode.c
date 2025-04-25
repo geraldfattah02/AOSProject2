@@ -642,3 +642,8 @@ void inode_set_symlink (struct inode *inode, bool is_symlink)
   inode->data.is_symlink = is_symlink;
   block_write (fs_device, inode->sector, &inode->data);
 }
+
+bool inode_is_dir (struct inode *inode)
+{ 
+  return inode->data.is_dir; 
+}

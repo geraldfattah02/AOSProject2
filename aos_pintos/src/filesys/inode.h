@@ -21,5 +21,6 @@ void inode_allow_write (struct inode *);
 off_t inode_length (const struct inode *);
 bool inode_get_symlink (struct inode *inode);
 void inode_set_symlink (struct inode *inode, bool is_symlink);
+bool inode_is_dir (struct inode *inode);
 
 #endif /* filesys/inode.h */

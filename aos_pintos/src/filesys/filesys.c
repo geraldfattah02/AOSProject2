@@ -37,6 +37,7 @@ void filesys_done (void) { free_map_close (); }
 
 static struct inode *path_to_inode (const char *syscall_path)
 {
+  DPRINT("path_to_inode: %s\n", syscall_path);
   char *path = malloc(strlen(syscall_path) + 1);
   if (!path) {
     DPRINT("Failed to allocate path\n");
@@ -73,6 +74,10 @@ static struct inode *path_to_inode (const char *syscall_path)
     should_close = true;
   }
   free (path);
+
+  if (node == NULL) {
+    node = dir_get_inode (current_dir);
+  }
 
   return node;
 }

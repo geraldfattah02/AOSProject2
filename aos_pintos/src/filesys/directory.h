@@ -18,6 +18,7 @@ struct dir;
 bool dir_create (block_sector_t sector, size_t entry_cnt, block_sector_t parent);
 bool dir_create_from_path (const char *syscall_path, struct dir* working_directory);
 struct dir *dir_open (struct inode *);
+struct dir *get_directory_from_path (const char *syscall_path, struct dir *working_directory);
 struct dir *dir_open_root (void);
 struct dir *dir_reopen (struct dir *);
 void dir_close (struct dir *);

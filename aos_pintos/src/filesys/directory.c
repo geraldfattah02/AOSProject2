@@ -114,6 +114,55 @@ bool dir_create_from_path (const char *syscall_path, struct dir* working_directo
   return true;
 }
 
+struct dir *get_directory_from_path (const char *syscall_path, struct dir *working_directory)
+{
+  DPRINT ("Opening dir %s\n", syscall_path);
+  char *path = malloc(strlen(syscall_path) + 1);
+  if (!path) {
+    return NULL;
+  }
+  strlcpy (path, syscall_path, strlen(syscall_path) + 1);
+
+  bool should_close = false;
+  struct dir *current_dir = working_directory;
+  if (syscall_path[0] == '/') {
+    current_dir = dir_open_root ();
+    should_close = true;
+  }
+
+  struct inode *node = NULL;
+  bool success;
+  char *token, *save_ptr;
+  for (token = strtok_r (path, "/", &save_ptr);
+       token != NULL;
+       token = strtok_r (NULL, "/", &save_ptr))
+  {
+    DPRINT("Token %s\n", token);
+    if (strlen(token) == 0) {
+      continue;
+    }
+    success = dir_lookup (current_dir, token, &node);
+    if (!success) {
+      DPRINT("DIR %s not found\n", token);
+      break;
+    }
+    current_dir = dir_open (node);
+    should_close = true;
+  }
+  block_sector_t parent = inode_get_inumber (dir_get_inode(current_dir));
+  DPRINT("parent %d\n", parent);
+  
+  if (success) { // Full path was found, directory exists
+    free (path);
+    return current_dir;
+  }
+
+  if (should_close)
+    dir_close (current_dir);
+  free (path);
+  return false;
+}
+
 /* Opens and returns the directory for the given INODE, of which
    it takes ownership.  Returns a null pointer on failure. */
 struct dir *dir_open (struct inode *inode)
