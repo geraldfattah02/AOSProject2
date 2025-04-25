@@ -27,15 +27,17 @@ bool dir_create (block_sector_t sector, size_t entry_cnt, block_sector_t parent)
 {
   bool success = inode_create (sector, entry_cnt * sizeof (struct dir_entry), true);
   struct dir_entry files[2];
-  memcpy(files[0].name, ".",2);
+  memcpy (&files[0].name, ".", 2);
   files[0].inode_sector = sector;
   files[0].in_use = true;
 
-  memcpy(files[1].name, "..",3);
-  files[1].inode_sector = sector;
+  memcpy (&files[1].name, "..", 3);
+  files[1].inode_sector = parent;
   files[1].in_use = true;
 
-  inode_write_at(sector,&files,2*sizeof (struct dir_entry),0);
+  struct inode *node = inode_open (sector);
+  inode_write_at (node, &files, 2 * sizeof (struct dir_entry), 0);
+  inode_close (node);
   return success;
 }
 
