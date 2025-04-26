@@ -89,6 +89,12 @@ static struct inode *path_to_inode_helper (struct dir *current_dir, char *path, 
     dir_close (current_dir);
     current_dir = dir_open (node);
   }
+
+  if (node == NULL) {
+    DPRINT("Returning current dir\n");
+    return dir_get_inode (current_dir);
+  }
+
   dir_close (current_dir);
 
   DPRINT("Returning node %p\n", node);
@@ -200,6 +206,9 @@ struct inode *filesys_remove_helper (struct dir *current, char *name) {
 bool filesys_remove (const char *syscall_path)
 {
   struct inode *node = path_to_inode (syscall_path, NULL, &filesys_remove_helper, NULL);
+  if (node != NULL && inode_get_inumber (node) == ROOT_DIR_SECTOR) {
+    return false;
+  }
   return node != NULL;
 }
 
@@ -227,4 +236,20 @@ static void do_format (void)
     PANIC ("root directory creation failed");
   free_map_close ();
   printf ("done.\n");
+}
+
+int get_file_stats (char *path, void *buf)
+{
+  struct inode *node = path_to_inode (path, NULL, NULL, NULL);
+
+  struct stat stats;
+  stats.logical_size = inode_length (node);
+  stats.blocks = inode_count_blocks (node);
+  stats.physical_size = stats.blocks * BLOCK_SECTOR_SIZE;
+  stats.inode_number = inode_get_inumber (node);
+
+  memcpy (buf, &stats, sizeof(struct stat));
+
+  inode_close (node);
+  return 0;
 }

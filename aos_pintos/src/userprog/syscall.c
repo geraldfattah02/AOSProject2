@@ -618,6 +618,5 @@ int inumber (int fd)
 
 int stat (char *pathname, void *buf)
 {
-  DPRINT ("Not implemented :( \n");
-  return 0;
+  return get_file_stats (pathname, buf);
 }

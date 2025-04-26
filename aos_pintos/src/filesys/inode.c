@@ -14,11 +14,13 @@
 #define INDIRECT_SIZE 128
 #define INVALID_SECTOR ((block_sector_t) -1)
 
+static char zeros[BLOCK_SECTOR_SIZE];
+
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk
 {
-  block_sector_t start; /* First data sector. */
+  size_t blocks;        /* Total allocated blocks. */
   off_t length;         /* File size in bytes. */
   unsigned magic;       /* Magic number. */
   bool is_symlink;      /* True if symbolic link, false otherwise. */
@@ -104,8 +106,11 @@ static bool allocate_sector (struct inode *inode, off_t pos, block_sector_t *sec
   // Check if index is in the direct blocks
   if (index < DIRECT_BLOCKS) {
     success = free_map_allocate (1, &inode->data.direct_map[index]);
+    if (!success)
+      return false;
     *sector = inode->data.direct_map[index];
-    return success;
+    inode->data.blocks++;
+    return true;
   }
 
   index -= DIRECT_BLOCKS;
@@ -129,6 +134,8 @@ static bool allocate_sector (struct inode *inode, off_t pos, block_sector_t *sec
     }
     block_write (fs_device, inode->data.indirect_block, buffer);
     *sector = buffer[index];
+
+    inode->data.blocks++;
     return true;
   }
 
@@ -152,12 +159,12 @@ static bool allocate_sector (struct inode *inode, off_t pos, block_sector_t *sec
     if (!success) {
       return false;
     }
+    indirect_sector = buffer[index / INDIRECT_SIZE];
     block_write (fs_device, inode->data.doubly_indirect, buffer);
     memset(&buffer, (uint8_t) -1, BLOCK_SECTOR_SIZE);
   } else {
     block_read (fs_device, indirect_sector, &buffer);
   }
-  indirect_sector = buffer[index / INDIRECT_SIZE];
 
   success = free_map_allocate (1, &buffer[index % INDIRECT_SIZE]);
   if (!success) {
@@ -165,6 +172,8 @@ static bool allocate_sector (struct inode *inode, off_t pos, block_sector_t *sec
   }
   block_write (fs_device, indirect_sector, buffer);
   *sector = buffer[index % INDIRECT_SIZE];
+
+  inode->data.blocks++;
   return true;
 }
 
@@ -214,8 +223,6 @@ bool inode_create (block_sector_t sector, off_t length, bool is_dir)
 // portions of the disk_inode, and initialize data blocks to 0.
 bool inode_allocate(size_t sectors, struct inode_disk *disk_inode)
 {
-  static char zeros[BLOCK_SECTOR_SIZE];
-
   if (sectors > DIRECT_BLOCKS + INDIRECT_SIZE + INDIRECT_SIZE * INDIRECT_SIZE) {
     return false;
   }
@@ -315,6 +322,7 @@ bool inode_allocate(size_t sectors, struct inode_disk *disk_inode)
   block_write (fs_device, disk_inode->doubly_indirect, doubly_indirect_block);
 
   if (allocated == sectors) {
+    disk_inode->blocks = allocated;
     return true;
   }
 
@@ -491,6 +499,10 @@ off_t inode_read_at (struct inode *inode, void *buffer_, off_t size,
       /* Disk sector to read, starting byte offset within sector. */
       block_sector_t sector_idx = byte_to_sector (inode, offset);
       if (sector_idx == INVALID_SECTOR) {
+        if (offset < inode->data.length) { // Read zeros for unallocated sector
+          memcpy (buffer, &zeros, size);
+          return size;
+        }
         DPRINT("READ invalid sector %d\n", sector_idx);
         break;
       }
@@ -661,4 +673,9 @@ void inode_set_symlink (struct inode *inode, bool is_symlink)
 bool inode_is_dir (struct inode *inode)
 { 
   return inode->data.is_dir; 
+}
+
+size_t inode_count_blocks (struct inode *node)
+{
+  return node->data.blocks;
 }

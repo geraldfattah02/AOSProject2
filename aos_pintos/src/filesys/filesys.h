@@ -25,6 +25,8 @@ struct stat
     blkcnt_t blocks;                /* Number of blocks allocated. */
 };
 
+int get_file_stats (char *path, void *buf);
+
 void filesys_init (bool format);
 void filesys_done (void);
 bool filesys_create (const char *name, off_t initial_size);
