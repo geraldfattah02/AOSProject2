@@ -120,7 +120,7 @@ struct inode *path_to_inode (const char *syscall_path, callback_fn missing_token
 
 struct inode *create_file_helper (struct dir *current, char *name, void *initial_size)
 {
-  DPRINT("Creating file %s\n", syscall_path);
+  DPRINT("Creating file %s\n", name);
   block_sector_t sector;
   bool success = free_map_allocate (1, &sector);
   if (!success) {

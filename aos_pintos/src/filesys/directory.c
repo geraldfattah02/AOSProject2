@@ -38,7 +38,11 @@ bool dir_create (block_sector_t sector, size_t entry_cnt, block_sector_t parent)
   files[1].in_use = true;
 
   struct inode *node = inode_open (sector);
-  inode_write_at (node, &files, 2 * sizeof (struct dir_entry), 0);
+  off_t size = 2 * sizeof (struct dir_entry);
+  if (inode_write_at (node, &files, size, 0) != size) {
+    DPRINT("Failed to write into directory\n");
+    success = false;
+  }
   inode_close (node);
   return success;
 }

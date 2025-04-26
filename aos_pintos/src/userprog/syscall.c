@@ -584,8 +584,12 @@ bool readdir (int fd, char *name)\
 
 bool isdir (int fd)
 {
-  DPRINT ("Not implemented :( \n");
-  return false;
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (file_descriptor == NULL)
+  {
+    return false;
+  }
+  return inode_is_dir (file_descriptor->file->inode);
 }
 
 int inumber (int fd)

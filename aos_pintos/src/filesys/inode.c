@@ -527,7 +527,7 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   off_t bytes_written = 0;
   uint8_t *bounce = NULL;
 
-  DPRINT("Write size: %d\n", size);
+  DPRINT("Write size: %d at off %d\n", size, offset);
 
   if (inode->deny_write_cnt)
     return 0;
@@ -536,7 +536,7 @@ off_t inode_write_at (struct inode *inode, const void *buffer_, off_t size,
     {
       /* Sector to write, starting byte offset within sector. */
       block_sector_t sector_idx = byte_to_sector (inode, offset);
-      DPRINT("Writing to sector %d\n", sector_idx);
+      DPRINT("Writing to sector idx %d\n", sector_idx);
       if (sector_idx == INVALID_SECTOR) {
         bool success = allocate_sector (inode, offset, &sector_idx);
         DPRINT("Allocation: %d, sector %d\n", success, sector_idx);
