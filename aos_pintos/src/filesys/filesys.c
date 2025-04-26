@@ -92,6 +92,9 @@ static struct inode *path_to_inode_helper (struct dir *current_dir, char *path, 
 
   if (node == NULL) {
     DPRINT("Returning current dir\n");
+    if (last_token != NULL) {
+      return last_token (current_dir, "", aux);
+    }
     return dir_get_inode (current_dir);
   }
 
@@ -194,6 +197,11 @@ struct file *filesys_open (const char *name)
 }
 
 struct inode *filesys_remove_helper (struct dir *current, char *name) {
+  block_sector_t dir_sector = inode_get_inumber (dir_get_inode (current));
+  DPRINT("Remove %d, name '%s'\n", dir_sector, name);
+  if (dir_sector == ROOT_DIR_SECTOR && strlen(name) == 0) {
+    return NULL; // Don't remove root directory
+  } 
   bool success = dir_remove (current, name);
   dir_close (current);
   return (struct inode *) success; // Non-zero => success
@@ -206,9 +214,6 @@ struct inode *filesys_remove_helper (struct dir *current, char *name) {
 bool filesys_remove (const char *syscall_path)
 {
   struct inode *node = path_to_inode (syscall_path, NULL, &filesys_remove_helper, NULL);
-  if (node != NULL && inode_get_inumber (node) == ROOT_DIR_SECTOR) {
-    return false;
-  }
   return node != NULL;
 }
 

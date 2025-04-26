@@ -288,7 +288,7 @@ static int open (const char *file_name)
     thread_exit ();
   }
 
-  if (strlen (file_name) > MAX_FILE_NAME || strlen (file_name) == 0)
+  if (strlen (file_name) == 0)
   {
     DPRINT("Invalid file name length\n");
     return -1;
