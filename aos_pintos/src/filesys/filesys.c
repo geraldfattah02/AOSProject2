@@ -39,11 +39,9 @@ void filesys_done (void) { free_map_close (); }
 static struct dir *get_current_working_directory ()
 {
   if (!thread_current ()->working_directory) {
-    DPRINT("Open root\n");
     thread_current ()->working_directory = dir_open_root ();
   }
 
-  DPRINT("Working sector %u\n", inode_get_inumber(dir_get_inode(thread_current ()->working_directory)));
   return thread_current ()->working_directory;
 }
 
@@ -82,7 +80,7 @@ static struct inode *path_to_inode_helper (struct dir *current_dir, char *path, 
     if (token == NULL) {
       if (last_token != NULL) {
         DPRINT("Have callback for last element: %s\n", prev_token);
-
+        inode_close (node);
         return last_token (current_dir, prev_token, aux);
       }
       DPRINT("Early exit\n");
@@ -154,7 +152,7 @@ struct dir *path_to_directory (const char *path)
   DPRINT ("Opening dir %s\n", path);
   struct inode *node = path_to_inode (path, NULL, NULL, NULL);
   if (node != NULL) {
-    return dir_open ( inode_reopen (node));
+    return dir_open ( node );
   }
   return NULL;
 }
@@ -224,6 +222,7 @@ static void do_format (void)
 {
   printf ("Formatting file system...");
   free_map_create ();
+  DPRINT("Created free map\n");
   if (!dir_create (ROOT_DIR_SECTOR, 16, ROOT_DIR_SECTOR))
     PANIC ("root directory creation failed");
   free_map_close ();

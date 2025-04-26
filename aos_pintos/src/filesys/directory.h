@@ -31,4 +31,6 @@ bool dir_readdir (struct dir *, char name[NAME_MAX + 1]);
 struct file;
 bool dir_readdir_file (struct file *, char name[NAME_MAX + 1]);
 
+void debug_print_directory (struct dir *dir);
+
 #endif /* filesys/directory.h */

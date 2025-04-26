@@ -264,6 +264,7 @@ static bool create (const char *file, unsigned initial_size)
 /* REMOVE a file */
 static bool remove (const char *file)
 {
+  DPRINT("[SYSCALL] remove %s\n", file);
   if (validate_user_pointer (file) == NULL)
   {
     set_exit_code (thread_current (), -1);
@@ -280,6 +281,7 @@ static bool remove (const char *file)
 /* OPEN a file */
 static int open (const char *file_name)
 {
+  DPRINT("[SYSCALL] open\n");
   if (validate_user_pointer (file_name) == NULL)
   {
     set_exit_code (thread_current (), -1);
@@ -288,6 +290,7 @@ static int open (const char *file_name)
 
   if (strlen (file_name) > MAX_FILE_NAME || strlen (file_name) == 0)
   {
+    DPRINT("Invalid file name length\n");
     return -1;
   }
 
@@ -297,6 +300,7 @@ static int open (const char *file_name)
 
   if (file == NULL)
   {
+    DPRINT("Null file\n");
     return -1;
   }
 
@@ -304,6 +308,7 @@ static int open (const char *file_name)
   struct file_descriptor *current_fd_struct = malloc (sizeof (struct file_descriptor));
   if (current_fd_struct == NULL)
   {
+    DPRINT("Failed malloc\n");
     return -1;
   }
 
@@ -320,6 +325,7 @@ static int open (const char *file_name)
   current_fd_struct->fd = next_fd;
   list_push_front (fd_list, &current_fd_struct->elem);
 
+  DPRINT("Returning %d\n", current_fd_struct->fd);
   return current_fd_struct->fd;
 }
 
@@ -484,6 +490,7 @@ static unsigned tell (int fd)
 /* CLOSE a file */
 static void close (int fd)
 {
+  DPRINT("[SYSCALL] close\n");
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
   if (file_descriptor == NULL)
   {
@@ -532,12 +539,15 @@ void free_thread_resources (struct thread *t)
   file_close (t->executable);
 
   while (!list_empty (&t->file_descriptors))
-    {
-      struct list_elem *e = list_pop_front (&t->file_descriptors);
-      struct file_descriptor *f = list_entry (e, struct file_descriptor, elem);
-      file_close (f->file);
-      free (f);
-    }
+  {
+    struct list_elem *e = list_pop_front (&t->file_descriptors);
+    struct file_descriptor *f = list_entry (e, struct file_descriptor, elem);
+    file_close (f->file);
+    free (f);
+  }
+
+  dir_close (t->working_directory);
+  check_open_inodes ();
 
   lock_release (&filesys_lock);
 }
@@ -549,7 +559,9 @@ bool chdir (const char *dir)
     return false;
   }
   DPRINT("[working_directory] chdir \n");
+  dir_close (thread_current ()->working_directory);
   thread_current ()->working_directory = open_dir;
+  debug_print_directory (open_dir);
   return true;
 }
 
@@ -573,6 +585,7 @@ bool mkdir (const char *dir)
 
 bool readdir (int fd, char *name)\
 {
+  DPRINT("[SYSCALL] readdir\n");
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
   if (file_descriptor == NULL)
   {
