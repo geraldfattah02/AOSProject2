@@ -184,6 +184,14 @@ tid_t thread_create (const char *name, int priority, thread_func *function,
   tid = t->tid = allocate_tid ();
   t->working_directory = dir;
 
+  /* Create its own copy of the working directory */
+  if (t->working_directory != NULL) {
+    DPRINT("[working_directory] from parent\n");
+    t->working_directory = dir_open ( inode_open(inode_get_inumber ( dir_get_inode (t->working_directory))));
+  } else {
+    DPRINT("[working_directory] dir is null\n");
+  }
+
   t->parent_record = parent_record;
   if (parent_record != NULL)
   {
@@ -492,6 +500,7 @@ static void init_thread (struct thread *t, const char *name, int priority)
   lock_init (&t->supplemental_page_table_lock);
 
   t->working_directory = NULL;
+  DPRINT("[working_directory] to null\n");
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

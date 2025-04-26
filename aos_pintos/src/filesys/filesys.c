@@ -35,144 +35,128 @@ void filesys_init (bool format)
    to disk. */
 void filesys_done (void) { free_map_close (); }
 
-static struct inode *path_to_inode (const char *syscall_path)
+/* Get current thread's working directory, or set to root if NULL. */
+static struct dir *get_current_working_directory ()
 {
-  DPRINT("path_to_inode: %s\n", syscall_path);
-  char *path = malloc(strlen(syscall_path) + 1);
-  if (!path) {
-    DPRINT("Failed to allocate path\n");
-    return NULL;
-  }
-  strlcpy (path, syscall_path, strlen(syscall_path) + 1);
-
-  bool should_close = true;
-  struct dir *current_dir = dir_open_root ();
-  if (syscall_path[0] != '/' && thread_current ()->working_directory != NULL) {
-    current_dir = thread_current ()->working_directory;
-    should_close = false;
+  if (!thread_current ()->working_directory) {
+    DPRINT("Open root\n");
+    thread_current ()->working_directory = dir_open_root ();
   }
 
+  DPRINT("Working sector %u\n", inode_get_inumber(dir_get_inode(thread_current ()->working_directory)));
+  return thread_current ()->working_directory;
+}
+
+;
+
+/* Will close current_dir */
+static struct inode *path_to_inode_helper (struct dir *current_dir, char *path, callback_fn missing_token, callback_fn last_token, void *aux)
+{
+  DPRINT("path_to_inode_helper: %s\n", path);
+  
   struct inode *node = NULL;
-  char *token, *save_ptr;
-  for (token = strtok_r (path, "/", &save_ptr);
-       token != NULL;
-       token = strtok_r (NULL, "/", &save_ptr))
+  char *prev_token, *save_ptr;
+  char *token = strtok_r (path, "/", &save_ptr);
+  prev_token = token;
+  while (token != NULL) 
   {
     DPRINT("Token %s\n", token);
     if (strlen(token) == 0) {
+      token = strtok_r (NULL, "/", &save_ptr);
       continue;
     }
     bool success = dir_lookup (current_dir, token, &node);
-    if (should_close) {
-      dir_close (current_dir);
-    }
     if (!success) {
-      DPRINT("Dir doesn't contain file for %s\n", token);
+      DPRINT("Dir doesn't contain file for %s, sector %u\n", token, inode_get_inumber (dir_get_inode (current_dir)));
+      if (strtok_r (NULL, "/", &save_ptr) == NULL && missing_token != NULL) {
+        DPRINT("Have callback for missing element: %s\n", token);
+
+        return missing_token (current_dir, token, aux);
+      }
+      dir_close (current_dir);
+      DPRINT("Returning null\n");
       return NULL;
     }
+    prev_token = token;
+    token = strtok_r (NULL, "/", &save_ptr);
+    if (token == NULL) {
+      if (last_token != NULL) {
+        DPRINT("Have callback for last element: %s\n", prev_token);
+
+        return last_token (current_dir, prev_token, aux);
+      }
+      DPRINT("Early exit\n");
+      break;
+    }
+    dir_close (current_dir);
     current_dir = dir_open (node);
-    should_close = true;
   }
-  free (path);
+  dir_close (current_dir);
 
-  if (node == NULL) {
-    node = dir_get_inode (current_dir);
-  }
-
+  DPRINT("Returning node %p\n", node);
   return node;
 }
 
+struct inode *path_to_inode (const char *syscall_path, callback_fn missing_token, callback_fn last_token, void *aux)
+{
+  DPRINT("path_to_inode: %s\n", syscall_path);
+
+  char *path = malloc(strlen(syscall_path) + 1);
+  if (!path)
+    return NULL;
+  strlcpy (path, syscall_path, strlen(syscall_path) + 1);
+
+  // New root, or copy of current working directory
+  struct dir *current_dir = (syscall_path[0] == '/')
+    ? dir_open_root ()
+    : dir_open ( inode_reopen( dir_get_inode (get_current_working_directory ())));
+
+  DPRINT("Working dir %u\n", inode_get_inumber(dir_get_inode(current_dir)));
+
+  struct inode *node = path_to_inode_helper(current_dir, path, missing_token, last_token, aux);
+  free(path);
+  return node;
+}
+
+struct inode *create_file_helper (struct dir *current, char *name, void *initial_size)
+{
+  DPRINT("Creating file %s\n", syscall_path);
+  block_sector_t sector;
+  bool success = free_map_allocate (1, &sector);
+  if (!success) {
+    dir_close (current);
+    return false;
+  }
+  success = inode_create (sector, (off_t)initial_size, false)
+          && dir_add (current, name, sector);
+  if (!success) {
+    free_map_release (sector, 1);
+    dir_close (current);
+    return false;
+  }
+  DPRINT("Created file %s\n", name);
+  dir_close (current);
+  return (struct inode*) 1; // 1 for success;
+}
 
 /* Creates a file named NAME with the given INITIAL_SIZE.
    Returns true if successful, false otherwise.
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
-bool filesys_create (const char *name, off_t initial_size)
-{
-  block_sector_t inode_sector = 0;
-  struct dir *dir = dir_open_root ();
-  bool success = (dir != NULL && free_map_allocate (1, &inode_sector) &&
-                  inode_create (inode_sector, initial_size, false) &&
-                  dir_add (dir, name, inode_sector));
-  if (!success && inode_sector != 0)
-    free_map_release (inode_sector, 1);
-
-  dir_close (dir);
-
-  return success;
+bool filesys_create (const char *path, off_t initial_size) {
+  struct inode *node = path_to_inode (path, &create_file_helper, NULL, initial_size);
+  return node == 1;
 }
 
-bool filesys_create_from_path (const char *syscall_path, struct dir* working_directory, off_t initial_size) {
-  DPRINT("Creating file %s\n", syscall_path);
-  block_sector_t sector;
-  bool success = free_map_allocate (1, &sector);
-  if (!success) {
-    free_map_release (sector, 1);
-    return false;
+/* Path to directory */
+struct dir *path_to_directory (const char *path)
+{
+  DPRINT ("Opening dir %s\n", path);
+  struct inode *node = path_to_inode (path, NULL, NULL, NULL);
+  if (node != NULL) {
+    return dir_open ( inode_reopen (node));
   }
-
-  char *path = malloc(strlen(syscall_path) + 1);
-  if (!path) {
-    DPRINT("Failed to allocate path\n");
-    free_map_release (sector, 1);
-    return false;
-  }
-  strlcpy (path, syscall_path, strlen(syscall_path) + 1);
-
-  bool should_close = false;
-  struct dir *current_dir = working_directory;
-  if (syscall_path[0] == '/') {
-    current_dir = dir_open_root ();
-    should_close = true;
-  }
-
-  struct inode *node = NULL;
-  char *token, *save_ptr;
-  for (token = strtok_r (path, "/", &save_ptr);
-       token != NULL;
-       token = strtok_r (NULL, "/", &save_ptr))
-  {
-    DPRINT("Token %s\n", token);
-    if (strlen(token) == 0) {
-      continue;
-    }
-    success = dir_lookup (current_dir, token, &node);
-    if (!success) {
-      DPRINT("DIR %s not found\n", token);
-      break;
-    }
-    current_dir = dir_open (node);
-    should_close = true;
-  }
-  block_sector_t parent = inode_get_inumber (dir_get_inode(current_dir));
-  DPRINT("parent %d\n", parent);
-  
-  if (success) { // Full path was found, directory exists
-    DPRINT("Full file path exists\n");
-    if (should_close) {
-      dir_close (current_dir);
-    }
-    free (path);
-    return false;
-  }
-  if (token == NULL || strtok_r (NULL, "/", &save_ptr) != NULL) {
-    DPRINT("Remaining token %s\n", token);
-    if (should_close) {
-      dir_close (current_dir);
-    }
-    free (path);
-    return false; // Not the last name in the path
-  }
-
-  inode_create (sector, initial_size, false);
-  dir_add (current_dir, token, sector);
-  DPRINT("Created file %s\n", token);
-
-  if (should_close) {
-    dir_close (current_dir);
-  }
-  free (path);
-  return true;
+  return NULL;
 }
 
 /* Opens the file with the given NAME.
@@ -182,8 +166,9 @@ bool filesys_create_from_path (const char *syscall_path, struct dir* working_dir
    or if an internal memory allocation fails. */
 struct file *filesys_open (const char *name)
 {
-  struct inode *inode = path_to_inode (name);
+  struct inode *inode = path_to_inode (name, NULL, NULL, NULL);
 
+  DPRINT("Returned inode %p\n", inode);
   if (inode == NULL)
     return NULL;
 
@@ -193,26 +178,31 @@ struct file *filesys_open (const char *name)
       inode_read_at (inode, target, NAME_MAX + 1, 0);
       struct dir *root = dir_open_root ();
       if (!dir_lookup (root, target, &inode))
-        {
+        { 
+          DPRINT("Failed symlink lookup %p\n", inode);
           return NULL;
         }
       dir_close (root);
     }
 
+  DPRINT("Opening file at inode %p\n", inode);
   return file_open (inode);
+}
+
+struct inode *filesys_remove_helper (struct dir *current, char *name) {
+  bool success = dir_remove (current, name);
+  dir_close (current);
+  return (struct inode *) success; // Non-zero => success
 }
 
 /* Deletes the file named NAME.
    Returns true if successful, false on failure.
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
-bool filesys_remove (const char *name)
+bool filesys_remove (const char *syscall_path)
 {
-  struct dir *dir = dir_open_root ();
-  bool success = dir != NULL && dir_remove (dir, name);
-  dir_close (dir);
-
-  return success;
+  struct inode *node = path_to_inode (syscall_path, NULL, &filesys_remove_helper, NULL);
+  return node != NULL;
 }
 
 /* Creates symbolic link LINKPATH to target file TARGET

@@ -256,13 +256,7 @@ static bool create (const char *file, unsigned initial_size)
     return false;
   }
 
-  lock_acquire (&filesys_lock);
-  if (thread_current ()->working_directory == NULL) {
-    DPRINT("NULL directory!");
-    thread_current ()->working_directory = dir_open_root ();
-  }
-  bool success =  filesys_create_from_path (file, thread_current ()->working_directory, initial_size);
-  lock_release (&filesys_lock);
+  bool success =  filesys_create (file, initial_size);
 
   return success;
 }
@@ -274,11 +268,6 @@ static bool remove (const char *file)
   {
     set_exit_code (thread_current (), -1);
     thread_exit ();
-  }
-
-  if (strlen (file) > MAX_FILE_NAME)
-  {
-    return false;
   }
 
   lock_acquire (&filesys_lock);
@@ -297,7 +286,7 @@ static int open (const char *file_name)
     thread_exit ();
   }
 
-  if (strlen (file_name) > MAX_FILE_NAME)
+  if (strlen (file_name) > MAX_FILE_NAME || strlen (file_name) == 0)
   {
     return -1;
   }
@@ -555,13 +544,11 @@ void free_thread_resources (struct thread *t)
 
 bool chdir (const char *dir)
 {
-  if (!thread_current ()->working_directory) {
-    thread_current ()->working_directory = dir_open_root ();
-  }
-  struct dir *open_dir = get_directory_from_path (dir, thread_current ()->working_directory);
+  struct dir *open_dir = path_to_directory (dir);
   if (open_dir == NULL) {
     return false;
   }
+  DPRINT("[working_directory] chdir \n");
   thread_current ()->working_directory = open_dir;
   return true;
 }
@@ -579,19 +566,20 @@ bool mkdir (const char *dir)
     return false;
   }
 
-  if (thread_current ()->working_directory == NULL) {
-    DPRINT("NULL directory!");
-    thread_current ()->working_directory = dir_open_root ();
-  }
-  bool success = dir_create_from_path (dir, thread_current ()->working_directory);
+  bool success = dir_create_from_path (dir);
 
   return success;
 }
 
 bool readdir (int fd, char *name)\
 {
-  DPRINT ("Not implemented :( \n");
-  return false;
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (file_descriptor == NULL)
+  {
+    return false;
+  }
+  bool success = dir_readdir_file (file_descriptor->file, name);
+  return success;
 }
 
 bool isdir (int fd)

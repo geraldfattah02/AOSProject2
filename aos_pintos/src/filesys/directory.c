@@ -6,6 +6,7 @@
 #include "filesys/inode.h"
 #include "threads/malloc.h"
 #include "filesys/free-map.h"
+#include "file.h"
 
 /* A directory. */
 struct dir
@@ -42,125 +43,39 @@ bool dir_create (block_sector_t sector, size_t entry_cnt, block_sector_t parent)
   return success;
 }
 
-bool dir_create_from_path (const char *syscall_path, struct dir* working_directory) {
-  DPRINT("Creating dir %s\n", syscall_path);
+static struct inode *dir_create_helper (struct dir *current, char *name, void *aux)
+{
   block_sector_t sector;
   bool success = free_map_allocate (1, &sector);
   if (!success) {
-    free_map_release (sector, 1);
-    return false;
-  }
-
-  char *path = malloc(strlen(syscall_path) + 1);
-  if (!path) {
-    DPRINT("Failed to allocate path\n");
-    free_map_release (sector, 1);
-    return false;
-  }
-  strlcpy (path, syscall_path, strlen(syscall_path) + 1);
-
-  bool should_close = false;
-  struct dir *current_dir = working_directory;
-  if (syscall_path[0] == '/') {
-    current_dir = dir_open_root ();
-    should_close = true;
-  }
-
-  struct inode *node = NULL;
-  char *token, *save_ptr;
-  for (token = strtok_r (path, "/", &save_ptr);
-       token != NULL;
-       token = strtok_r (NULL, "/", &save_ptr))
-  {
-    DPRINT("Token %s\n", token);
-    if (strlen(token) == 0) {
-      continue;
-    }
-    success = dir_lookup (current_dir, token, &node);
-    if (!success) {
-      DPRINT("DIR %s not found\n", token);
-      break;
-    }
-    current_dir = dir_open (node);
-    should_close = true;
-  }
-  block_sector_t parent = inode_get_inumber (dir_get_inode(current_dir));
-  DPRINT("parent %d\n", parent);
-  
-  if (success) { // Full path was found, directory exists
-    DPRINT("Full dir path exists\n");
-    if (should_close) {
-      dir_close (current_dir);
-    }
-    free (path);
-    return false;
-  }
-  if (token == NULL || strtok_r (NULL, "/", &save_ptr) != NULL) {
-    DPRINT("Remaining token %s\n", token);
-    if (should_close) {
-      dir_close (current_dir);
-    }
-    free (path);
-    return false; // Not the last name in the path
-  }
-
-  dir_create (sector, 0, parent);
-  dir_add (current_dir, token, sector);
-
-  if (should_close) {
-    dir_close (current_dir);
-  }
-  free (path);
-  return true;
-}
-
-struct dir *get_directory_from_path (const char *syscall_path, struct dir *working_directory)
-{
-  DPRINT ("Opening dir %s\n", syscall_path);
-  char *path = malloc(strlen(syscall_path) + 1);
-  if (!path) {
+    dir_close (current);
     return NULL;
   }
-  strlcpy (path, syscall_path, strlen(syscall_path) + 1);
 
-  bool should_close = false;
-  struct dir *current_dir = working_directory;
-  if (syscall_path[0] == '/') {
-    current_dir = dir_open_root ();
-    should_close = true;
+  block_sector_t parent = inode_get_inumber (dir_get_inode (current));
+
+  success = dir_create (sector, 0, parent);
+  if (!success) {
+    free_map_release (sector, 1);
+    dir_close (current);
+    return NULL;
   }
 
-  struct inode *node = NULL;
-  bool success;
-  char *token, *save_ptr;
-  for (token = strtok_r (path, "/", &save_ptr);
-       token != NULL;
-       token = strtok_r (NULL, "/", &save_ptr))
-  {
-    DPRINT("Token %s\n", token);
-    if (strlen(token) == 0) {
-      continue;
-    }
-    success = dir_lookup (current_dir, token, &node);
-    if (!success) {
-      DPRINT("DIR %s not found\n", token);
-      break;
-    }
-    current_dir = dir_open (node);
-    should_close = true;
-  }
-  block_sector_t parent = inode_get_inumber (dir_get_inode(current_dir));
-  DPRINT("parent %d\n", parent);
-  
-  if (success) { // Full path was found, directory exists
-    free (path);
-    return current_dir;
+  success = dir_add (current, name, sector);
+  if (!success) {
+    free_map_release (sector, 1);
+    dir_close (current);
+    return NULL;
   }
 
-  if (should_close)
-    dir_close (current_dir);
-  free (path);
-  return false;
+  dir_close (current);
+  return (struct inode *) 1; // 1 for success
+}
+
+bool dir_create_from_path (const char *syscall_path) {
+  DPRINT("Creating dir %s\n", syscall_path);
+  struct inode* node = path_to_inode(syscall_path, &dir_create_helper, NULL, NULL);
+  return node == 1;
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -346,6 +261,28 @@ bool dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
   while (inode_read_at (dir->inode, &e, sizeof e, dir->pos) == sizeof e)
     {
       dir->pos += sizeof e;
+      if (e.in_use)
+        {
+          strlcpy (name, e.name, NAME_MAX + 1);
+          return true;
+        }
+    }
+  return false;
+}
+
+/* Reads the next directory entry in FILE and stores the name in
+   NAME.  Returns true if successful, false if the directory
+   contains no more entries. */
+bool dir_readdir_file (struct file *file, char name[NAME_MAX + 1])
+{
+  struct dir_entry e;
+  if (file->pos == 0) {
+    file->pos += 2 * sizeof(struct dir_entry); // skip . and ..
+  }
+
+  while (inode_read_at (file->inode, &e, sizeof e, file->pos) == sizeof e)
+    {
+      file->pos += sizeof e;
       if (e.in_use)
         {
           strlcpy (name, e.name, NAME_MAX + 1);

@@ -31,6 +31,11 @@ bool filesys_create (const char *name, off_t initial_size);
 struct file *filesys_open (const char *name);
 bool filesys_remove (const char *name);
 
+struct dir;
+typedef struct inode* (*callback_fn)(struct dir*, char*, void*);
+struct inode *path_to_inode (const char *syscall_path, callback_fn missing_token, callback_fn last_token, void *aux);
+struct dir *path_to_directory (const char *path);
+
 /* Symbolic link creation */
 bool filesys_symlink (char *target, char *linkpath);
 
