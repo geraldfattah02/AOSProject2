@@ -26,5 +26,7 @@ bool inode_is_dir (struct inode *inode);
 void check_open_inodes ();
 size_t inode_count_blocks (struct inode *node);
 bool dir_is_empty (struct inode *node, bool *result);
+void dir_inode_lock (struct inode *node);
+void dir_inode_unlock (struct inode *node);
 
 #endif /* filesys/inode.h */

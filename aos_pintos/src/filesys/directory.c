@@ -206,6 +206,7 @@ bool dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
 
   DPRINT("dir_add\n");
   /* Check that NAME is not in use. */
+  dir_inode_lock ( dir_get_inode (dir));
   if (lookup (dir, name, NULL, NULL))
     goto done;
 
@@ -228,6 +229,7 @@ bool dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   success = inode_write_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
 
 done:
+  dir_inode_unlock ( dir_get_inode (dir));
   return success;
 }
 
@@ -244,11 +246,9 @@ bool dir_remove (struct dir *dir, const char *name)
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
-  DPRINT("Before delete\n");
-  debug_print_directory (dir);
-
   DPRINT("dir_remove\n");
   /* Find directory entry. */
+  dir_inode_lock ( dir_get_inode (dir));
   if (!lookup (dir, name, &e, &ofs))
     goto done;
 
@@ -266,10 +266,8 @@ bool dir_remove (struct dir *dir, const char *name)
   inode_remove (inode);
   success = true;
 
-  DPRINT("After delete\n");
-  debug_print_directory (dir);
-
 done:
+  dir_inode_unlock ( dir_get_inode (dir));
   inode_close (inode);
   return success;
 }

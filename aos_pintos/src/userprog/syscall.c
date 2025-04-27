@@ -347,6 +347,7 @@ static int filesize (int fd)
 /* READ a file */
 static int read (int fd, void *buffer, unsigned size, void *esp)
 {
+  DPRINT("[SYSCALL] read\n");
   char *end = (char*) buffer + size - 1;
   void *upage = pg_round_down (buffer);
   bool is_stack = stack_heuristic (buffer, esp);
@@ -356,6 +357,10 @@ static int read (int fd, void *buffer, unsigned size, void *esp)
   {
     set_exit_code (thread_current (), -1);
     thread_exit ();
+  }
+
+  if (size == 0) {
+    return 0;
   }
   
   // Initial stack page (if needed)
@@ -416,6 +421,9 @@ static int read (int fd, void *buffer, unsigned size, void *esp)
   {
     return -1;
   }
+
+  /* Pre-fault the page, to avoid a page fault during the actual file read. */
+  ((int*)buffer)[0] = 0;
   
   lock_acquire (&filesys_lock);
   off_t bytes_read = file_read (file_descriptor->file, buffer, size);
@@ -427,6 +435,7 @@ static int read (int fd, void *buffer, unsigned size, void *esp)
 /* WRITE to a file */
 static int write (int fd, const void *buffer, unsigned size)
 {
+  DPRINT("[SYSCALL] write\n");
   char *end = (char*)buffer + size - 1;
   if (validate_user_pointer (buffer) == NULL || validate_user_pointer (end) == NULL)
   {
@@ -547,7 +556,6 @@ void free_thread_resources (struct thread *t)
   }
 
   dir_close (t->working_directory);
-  check_open_inodes ();
 
   lock_release (&filesys_lock);
 }
