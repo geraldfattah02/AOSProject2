@@ -473,6 +473,11 @@ void check_open_inodes () {
       }
     }
 
+  DPRINT("Printing root dir\n");
+  struct dir *root = dir_open_root ();
+  debug_print_directory (root);
+  dir_close (root);
+
   return NULL;
 }
 

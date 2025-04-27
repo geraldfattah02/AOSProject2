@@ -12,6 +12,7 @@
 #ifdef FILESYS
 #include "devices/block.h"
 #include "filesys/filesys.h"
+#include "filesys/directory.h"
 #endif
 
 /* Keyboard control register port. */
@@ -84,6 +85,7 @@ void shutdown_power_off (void)
   const char *p;
 
 #ifdef FILESYS
+  dir_close (thread_current ()->working_directory);
   filesys_done ();
 #endif
 
