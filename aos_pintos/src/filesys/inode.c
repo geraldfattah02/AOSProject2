@@ -7,6 +7,8 @@
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
 #include "threads/synch.h"
+#include "file.h"
+#include "directory.h"
 
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
@@ -484,6 +486,11 @@ void inode_remove (struct inode *inode)
   lock_release (&inode->lock);
 }
 
+bool is_inode_removed (struct inode *inode)
+{
+  return inode->removed;
+}
+
 /* Reads SIZE bytes from INODE into BUFFER, starting at position OFFSET.
    Returns the number of bytes actually read, which may be less
    than SIZE if an error occurs or end of file is reached. */
@@ -678,4 +685,20 @@ bool inode_is_dir (struct inode *inode)
 size_t inode_count_blocks (struct inode *node)
 {
   return node->data.blocks;
+}
+
+bool dir_is_empty (struct inode *node, bool *result)
+{
+  if (!inode_is_dir (node)) {
+    *result = true;
+    return true;
+  }
+  struct file *file = file_open (node);
+  if (file == NULL) {
+    return false;
+  }
+  char name[15];
+  bool empty = !dir_readdir_file (file, &name);
+  *result = empty;
+  return true;
 }

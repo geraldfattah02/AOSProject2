@@ -51,6 +51,11 @@ static struct dir *get_current_working_directory ()
 static struct inode *path_to_inode_helper (struct dir *current_dir, char *path, callback_fn missing_token, callback_fn last_token, void *aux)
 {
   DPRINT("path_to_inode_helper: %s\n", path);
+
+  if (is_inode_removed ( dir_get_inode (current_dir))) {
+    dir_close (current_dir);
+    return NULL;
+  }
   
   struct inode *node = NULL;
   char *prev_token, *save_ptr;
@@ -75,6 +80,13 @@ static struct inode *path_to_inode_helper (struct dir *current_dir, char *path, 
       DPRINT("Returning null\n");
       return NULL;
     }
+
+    if (is_inode_removed ( dir_get_inode (node))) {
+      inode_close (node);
+      dir_close (current_dir);
+      return NULL;
+    }
+
     prev_token = token;
     token = strtok_r (NULL, "/", &save_ptr);
     if (token == NULL) {
@@ -88,6 +100,10 @@ static struct inode *path_to_inode_helper (struct dir *current_dir, char *path, 
     }
     dir_close (current_dir);
     current_dir = dir_open (node);
+
+    if (is_inode_removed ( dir_get_inode (current_dir))) {
+      return NULL;
+    }
   }
 
   if (node == NULL) {
@@ -200,9 +216,25 @@ struct inode *filesys_remove_helper (struct dir *current, char *name) {
   block_sector_t dir_sector = inode_get_inumber (dir_get_inode (current));
   DPRINT("Remove %d, name '%s'\n", dir_sector, name);
   if (dir_sector == ROOT_DIR_SECTOR && strlen(name) == 0) {
+    dir_close (current);
     return NULL; // Don't remove root directory
   } 
-  bool success = dir_remove (current, name);
+  struct inode *node;
+  bool success = dir_lookup(current, name, &node);
+  if (!success) {
+    dir_close (current);
+    return NULL;
+  }
+  bool is_empty = false;
+  success = dir_is_empty (node, &is_empty);
+  DPRINT ("Removing file, isdir %d, success %d, empty %d\n", inode_is_dir (node), success, is_empty);
+  if (inode_is_dir (node) && success && !is_empty) {
+    inode_close (node);
+    dir_close (current);
+    return NULL;
+  }
+  inode_close (node);
+  success = dir_remove (current, name);
   dir_close (current);
   return (struct inode *) success; // Non-zero => success
 }

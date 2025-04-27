@@ -14,6 +14,7 @@ struct inode *inode_reopen (struct inode *);
 block_sector_t inode_get_inumber (const struct inode *);
 void inode_close (struct inode *);
 void inode_remove (struct inode *);
+bool is_inode_removed (struct inode *inode);
 off_t inode_read_at (struct inode *, void *, off_t size, off_t offset);
 off_t inode_write_at (struct inode *, const void *, off_t size, off_t offset);
 void inode_deny_write (struct inode *);
@@ -24,5 +25,6 @@ void inode_set_symlink (struct inode *inode, bool is_symlink);
 bool inode_is_dir (struct inode *inode);
 void check_open_inodes ();
 size_t inode_count_blocks (struct inode *node);
+bool dir_is_empty (struct inode *node, bool *result);
 
 #endif /* filesys/inode.h */
