@@ -408,9 +408,7 @@ static int read (int fd, void *buffer, unsigned size, void *esp)
     return -1;
   }
 
-  /* Pre-fault the page, to avoid a page fault during the actual file read. */
-  ((int*)buffer)[0] = 0;
-  
+  ((int*)buffer)[0] = 0;  
   lock_acquire (&filesys_lock);
   off_t bytes_read = file_read (file_descriptor->file, buffer, size);
   lock_release (&filesys_lock);
@@ -574,7 +572,7 @@ bool mkdir (const char *dir)
   return success;
 }
 
-bool readdir (int fd, char *name)\
+bool readdir (int fd, char *name)
 {
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
   if (file_descriptor == NULL)
