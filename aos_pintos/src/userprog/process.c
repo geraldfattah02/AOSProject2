@@ -84,7 +84,6 @@ tid_t process_execute (const char *file_and_args)
   record->should_free = false;
   record->loaded_successfully = false;
 
-  DPRINT("THread Working dir %p\n", thread_current ()->working_directory);
   struct file *executable = filesys_open (name);
   if (executable == NULL)
   {

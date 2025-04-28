@@ -167,7 +167,6 @@ static void page_fault (struct intr_frame *f)
   {
     accessing_stack = true;
   }
-  DPRINT ("Page Fault occured for %p\n", fault_addr);
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
@@ -181,16 +180,12 @@ static void page_fault (struct intr_frame *f)
     if (spte == NULL)
     {
       /* Trying to access a page with no stpe */
-      if (!accessing_stack)
-      {
-        DPRINT ("Page not found, not part of stack.\n");
+      if (!accessing_stack) {
         kill (f);
         return;
       }
 
-      if (!grow_stack (upage))
-      {
-        DPRINT ("Failed to grow stack.\n");
+      if (!grow_stack (upage)) {
         kill (f);
         return;
       }
@@ -204,7 +199,6 @@ static void page_fault (struct intr_frame *f)
     if (!load_spte_into_frame (frame->kpage_addr, spte))
     {
       frame->pinned = false;
-      DPRINT ("Failed loading spte\n");
       free_frame_entry (frame);
       kill (f);
       return;
@@ -216,7 +210,6 @@ static void page_fault (struct intr_frame *f)
   }
   else
   {
-    DPRINT ("Fatal Page Fault occured for %p, killing thread.\n", fault_addr);
     kill (f);
     return;
   }

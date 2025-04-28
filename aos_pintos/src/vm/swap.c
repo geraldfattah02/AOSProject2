@@ -42,8 +42,6 @@ void swap_init (void)
   
   /* Initialize swap lock */
   lock_init (&swap_lock);
-  
-  DPRINT ("Swap initialized with %zu slots\n", swap_size);
 }
 
 /* Swap out a page to the swap device, returns the swap slot index */
@@ -70,8 +68,6 @@ swap_out (void *frame)
                  swap_index * PAGE_SECTORS + i,
                  (uint8_t*) frame + i * BLOCK_SECTOR_SIZE);
   }
-
-  DPRINT ("Swapping out %p to %d\n", frame, swap_index);
   
   lock_release (&swap_lock);
   
@@ -83,8 +79,6 @@ bool
 swap_in (swap_index_t swap_index, void *frame)
 {
   ASSERT (frame != NULL);
-
-  DPRINT ("Swapping in %d to %p\n", swap_index, frame);
   
   /* Acquire the swap lock */
   lock_acquire (&swap_lock);

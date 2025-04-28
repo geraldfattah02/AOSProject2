@@ -34,7 +34,6 @@ bool free_map_allocate (size_t cnt, block_sector_t *sectorp)
     }
   if (sector != BITMAP_ERROR)
     *sectorp = sector;
-  DPRINT("Allocated sector %d\n", sector);
   return sector != BITMAP_ERROR;
 }
 
@@ -44,7 +43,6 @@ void free_map_release (block_sector_t sector, size_t cnt)
   ASSERT (bitmap_all (free_map, sector, cnt));
   bitmap_set_multiple (free_map, sector, cnt, false);
   bitmap_write (free_map, free_map_file);
-  DPRINT("Released sector %d\n", sector);
 }
 
 /* Opens the free map file and reads it from disk. */
@@ -64,11 +62,9 @@ void free_map_close (void) { file_close (free_map_file); }
    it. */
 void free_map_create (void)
 {
-  DPRINT("Creating free map at sector 0, size %d\n", bitmap_file_size (free_map));
   /* Create inode. */
   if (!inode_create (FREE_MAP_SECTOR, bitmap_file_size (free_map), false))
     PANIC ("free map creation failed");
-  DPRINT("Created free map at sector 0, size %d\n", bitmap_file_size (free_map));
 
   /* Write bitmap to file. */
   free_map_file = file_open (inode_open (FREE_MAP_SECTOR));
@@ -76,5 +72,4 @@ void free_map_create (void)
     PANIC ("can't open free map");
   if (!bitmap_write (free_map, free_map_file))
     PANIC ("can't write free map");
-  DPRINT("Wrote bitmap to file\n");
 }

@@ -194,7 +194,6 @@ static void syscall_handler (struct intr_frame *f)
       f->eax = stat ((char*) ARG1, (void*) ARG2);
       return;
     default:
-      DPRINT ("system call %d not implemented\n", syscall_id);
       thread_exit ();
   }
 }
@@ -264,7 +263,6 @@ static bool create (const char *file, unsigned initial_size)
 /* REMOVE a file */
 static bool remove (const char *file)
 {
-  DPRINT("[SYSCALL] remove %s\n", file);
   if (validate_user_pointer (file) == NULL)
   {
     set_exit_code (thread_current (), -1);
@@ -281,16 +279,12 @@ static bool remove (const char *file)
 /* OPEN a file */
 static int open (const char *file_name)
 {
-  DPRINT("[SYSCALL] open\n");
-  if (validate_user_pointer (file_name) == NULL)
-  {
+  if (validate_user_pointer (file_name) == NULL) {
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
 
-  if (strlen (file_name) == 0)
-  {
-    DPRINT("Invalid file name length\n");
+  if (strlen (file_name) == 0) {
     return -1;
   }
 
@@ -298,17 +292,13 @@ static int open (const char *file_name)
   struct file *file = filesys_open (file_name);
   lock_release (&filesys_lock);
 
-  if (file == NULL)
-  {
-    DPRINT("Null file\n");
+  if (file == NULL) {
     return -1;
   }
 
   struct thread *t = thread_current ();
   struct file_descriptor *current_fd_struct = malloc (sizeof (struct file_descriptor));
-  if (current_fd_struct == NULL)
-  {
-    DPRINT("Failed malloc\n");
+  if (current_fd_struct == NULL) {
     return -1;
   }
 
@@ -325,7 +315,6 @@ static int open (const char *file_name)
   current_fd_struct->fd = next_fd;
   list_push_front (fd_list, &current_fd_struct->elem);
 
-  DPRINT("Returning %d\n", current_fd_struct->fd);
   return current_fd_struct->fd;
 }
 
@@ -347,7 +336,6 @@ static int filesize (int fd)
 /* READ a file */
 static int read (int fd, void *buffer, unsigned size, void *esp)
 {
-  DPRINT("[SYSCALL] read\n");
   char *end = (char*) buffer + size - 1;
   void *upage = pg_round_down (buffer);
   bool is_stack = stack_heuristic (buffer, esp);
@@ -375,7 +363,6 @@ static int read (int fd, void *buffer, unsigned size, void *esp)
   struct sup_page_table_entry *entry = lookup_sup_page_entry (upage);
   if (entry == NULL)
   {
-    DPRINT ("Doesn't exist in spt\n");
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
@@ -383,7 +370,6 @@ static int read (int fd, void *buffer, unsigned size, void *esp)
   // Check if page is writeable.
   if (!entry->writable)
   {
-    DPRINT ("Not writeable\n");
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
@@ -435,7 +421,6 @@ static int read (int fd, void *buffer, unsigned size, void *esp)
 /* WRITE to a file */
 static int write (int fd, const void *buffer, unsigned size)
 {
-  DPRINT("[SYSCALL] write\n");
   char *end = (char*)buffer + size - 1;
   if (validate_user_pointer (buffer) == NULL || validate_user_pointer (end) == NULL)
   {
@@ -499,7 +484,6 @@ static unsigned tell (int fd)
 /* CLOSE a file */
 static void close (int fd)
 {
-  DPRINT("[SYSCALL] close\n");
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
   if (file_descriptor == NULL)
   {
@@ -566,10 +550,9 @@ bool chdir (const char *dir)
   if (open_dir == NULL) {
     return false;
   }
-  DPRINT("[working_directory] chdir \n");
   dir_close (thread_current ()->working_directory);
   thread_current ()->working_directory = open_dir;
-  debug_print_directory (open_dir);
+
   return true;
 }
 
@@ -593,7 +576,6 @@ bool mkdir (const char *dir)
 
 bool readdir (int fd, char *name)\
 {
-  DPRINT("[SYSCALL] readdir\n");
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
   if (file_descriptor == NULL)
   {

@@ -48,8 +48,6 @@ allocate_frame (enum palloc_flags flags)
   frame->owner_thread = thread_current ();
   frame->pinned = true;
 
-  DPRINT ("Allocating frame %p for %p\n", page, thread_current ());
-
   list_push_back (&frame_table, &frame->elem);
   lock_release (&frame_table_lock);
   

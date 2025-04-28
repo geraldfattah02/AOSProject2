@@ -40,21 +40,21 @@ bool dir_create (block_sector_t sector, size_t entry_cnt, block_sector_t parent)
   struct inode *node = inode_open (sector);
   off_t size = 2 * sizeof (struct dir_entry);
   if (inode_write_at (node, &files, size, 0) != size) {
-    DPRINT("Failed to write into directory\n");
     success = false;
   }
   inode_close (node);
   return success;
 }
 
+/**
+ * Helper function for creating a directory in given directory.
+ */
 static struct inode *dir_create_helper (struct dir *current, char *name, void *aux)
 {
-  DPRINT("[start] dir_create_helper\n");
   block_sector_t sector;
   bool success = free_map_allocate (1, &sector);
   if (!success) {
     dir_close (current);
-    DPRINT("[end] dir_create_helper\n");
     return NULL;
   }
 
@@ -64,7 +64,6 @@ static struct inode *dir_create_helper (struct dir *current, char *name, void *a
   if (!success) {
     free_map_release (sector, 1);
     dir_close (current);
-    DPRINT("[end] dir_create_helper\n");
     return NULL;
   }
 
@@ -72,18 +71,18 @@ static struct inode *dir_create_helper (struct dir *current, char *name, void *a
   if (!success) {
     free_map_release (sector, 1);
     dir_close (current);
-    DPRINT("[end] dir_create_helper\n");
     return NULL;
   }
 
   dir_close (current);
-  DPRINT("[end] dir_create_helper\n");
   return (struct inode *) 1; // 1 for success
 }
 
+/**
+ * Create directory with given path.
+ */
 bool dir_create_from_path (const char *syscall_path) {
-  DPRINT("Creating dir %s\n", syscall_path);
-  struct inode* node = path_to_inode(syscall_path, &dir_create_helper, NULL, NULL);
+  struct inode* node = path_to_inode (syscall_path, &dir_create_helper, NULL, NULL);
   return node == 1;
 }
 
@@ -150,18 +149,15 @@ static bool lookup (const struct dir *dir, const char *name,
   for (ofs = 0; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
        ofs += sizeof e)
   {
-    DPRINT("Checking name %s == (target) %s, use? %d, comp? %d\n", e.name, name, e.in_use, !strcmp (name, e.name));
     if (e.in_use && !strcmp (name, e.name))
     {
       if (ep != NULL)
         *ep = e;
       if (ofsp != NULL)
         *ofsp = ofs;
-      DPRINT("Returning true\n");
       return true;
     }
   }
-  DPRINT("Lookup: exit with read %d\n", inode_read_at (dir->inode, &e, sizeof e, ofs));
   return false;
 }
 
@@ -176,7 +172,6 @@ bool dir_lookup (const struct dir *dir, const char *name, struct inode **inode)
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
-  DPRINT("dir_lookup\n");
   if (lookup (dir, name, &e, NULL))
     *inode = inode_open (e.inode_sector);
   else
@@ -204,7 +199,6 @@ bool dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   if (*name == '\0' || strlen (name) > NAME_MAX)
     return false;
 
-  DPRINT("dir_add\n");
   /* Check that NAME is not in use. */
   dir_inode_lock ( dir_get_inode (dir));
   if (lookup (dir, name, NULL, NULL))
@@ -246,7 +240,6 @@ bool dir_remove (struct dir *dir, const char *name)
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
-  DPRINT("dir_remove\n");
   /* Find directory entry. */
   dir_inode_lock ( dir_get_inode (dir));
   if (!lookup (dir, name, &e, &ofs))
@@ -298,7 +291,7 @@ bool dir_readdir_file (struct file *file, char name[NAME_MAX + 1])
 {
   struct dir_entry e;
   if (file->pos == 0) {
-    file->pos += 2 * sizeof(struct dir_entry); // skip . and ..
+    file->pos += 2 * sizeof (struct dir_entry); // skip . and ..
   }
 
   while (inode_read_at (file->inode, &e, sizeof e, file->pos) == sizeof e)
@@ -311,13 +304,4 @@ bool dir_readdir_file (struct file *file, char name[NAME_MAX + 1])
         }
     }
   return false;
-}
-
-void debug_print_directory (struct dir *dir) {
-  struct dir *temp = dir_reopen( dir );
-  char name[15];
-  while (dir_readdir (temp, &name)) {
-    DPRINT("Contains: %s\n", name);
-  }
-  dir_close (temp);
 }
