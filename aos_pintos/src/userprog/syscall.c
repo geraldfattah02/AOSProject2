@@ -17,6 +17,9 @@
 #include "userprog/exception.h"
 #include "devices/input.h"
 #include "devices/shutdown.h"
+#include "filesys/directory.h"
+#include "filesys/free-map.h"
+#include "filesys/inode.h"
 
 #define MAX_FILE_NAME 14
 
@@ -64,6 +67,13 @@ static void seek (int fd, unsigned position);
 static unsigned tell (int fd);
 static void close (int fd);
 static int symlink (char *target, char *linkpath);
+
+static bool chdir (const char *dir);
+static bool mkdir (const char *dir);
+static bool readdir (int fd, char *name);
+static bool isdir (int fd);
+static int inumber (int fd);
+static int stat (char *pathname, void *buf); 
 
 /* Initialize syscall */
 static void syscall_handler (struct intr_frame *);
@@ -130,19 +140,19 @@ static void syscall_handler (struct intr_frame *f)
       exit (ARG1);
       return;
     case SYS_EXEC:
-      f->eax = exec ((const char *) ARG1);
+      f->eax = exec ((const char*) ARG1);
       return;
     case SYS_WAIT:
       f->eax = wait (ARG1);
       return;
     case SYS_CREATE:
-      f->eax = create ((const char *) ARG1, ARG2);
+      f->eax = create ((const char*) ARG1, ARG2);
       return;
     case SYS_REMOVE:
-      f->eax = remove ((const char *) ARG1);
+      f->eax = remove ((const char*) ARG1);
       return;
     case SYS_OPEN:
-      f->eax = open ((const char *) ARG1);
+      f->eax = open ((const char*) ARG1);
       return;
     case SYS_FILESIZE:
       f->eax = filesize (ARG1);
@@ -165,8 +175,25 @@ static void syscall_handler (struct intr_frame *f)
     case SYS_SYMLINK:
       f->eax = symlink ((char*) ARG1, (char*) ARG2);
       return;
+    case SYS_CHDIR:
+      f->eax = chdir ((const char*) ARG1);
+      return;
+    case SYS_MKDIR:
+      f->eax = mkdir ((const char*) ARG1);
+      return;
+    case SYS_READDIR:
+      f->eax = readdir (ARG1, (char*) ARG2);
+      return;
+    case SYS_ISDIR:
+      f->eax = isdir (ARG1);
+      return;
+    case SYS_INUMBER:
+      f->eax = inumber (ARG1);
+      return;
+    case SYS_STAT:
+      f->eax = stat ((char*) ARG1, (void*) ARG2);
+      return;
     default:
-      DPRINT ("system call %d not implemented\n", syscall_id);
       thread_exit ();
   }
 }
@@ -228,9 +255,7 @@ static bool create (const char *file, unsigned initial_size)
     return false;
   }
 
-  lock_acquire (&filesys_lock);
-  bool success = filesys_create (file, initial_size);
-  lock_release (&filesys_lock);
+  bool success =  filesys_create (file, initial_size);
 
   return success;
 }
@@ -244,11 +269,6 @@ static bool remove (const char *file)
     thread_exit ();
   }
 
-  if (strlen (file) > MAX_FILE_NAME)
-  {
-    return false;
-  }
-
   lock_acquire (&filesys_lock);
   bool success = filesys_remove (file);
   lock_release (&filesys_lock);
@@ -259,14 +279,12 @@ static bool remove (const char *file)
 /* OPEN a file */
 static int open (const char *file_name)
 {
-  if (validate_user_pointer (file_name) == NULL)
-  {
+  if (validate_user_pointer (file_name) == NULL) {
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
 
-  if (strlen (file_name) > MAX_FILE_NAME)
-  {
+  if (strlen (file_name) == 0) {
     return -1;
   }
 
@@ -274,15 +292,13 @@ static int open (const char *file_name)
   struct file *file = filesys_open (file_name);
   lock_release (&filesys_lock);
 
-  if (file == NULL)
-  {
+  if (file == NULL) {
     return -1;
   }
 
   struct thread *t = thread_current ();
   struct file_descriptor *current_fd_struct = malloc (sizeof (struct file_descriptor));
-  if (current_fd_struct == NULL)
-  {
+  if (current_fd_struct == NULL) {
     return -1;
   }
 
@@ -330,6 +346,10 @@ static int read (int fd, void *buffer, unsigned size, void *esp)
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
+
+  if (size == 0) {
+    return 0;
+  }
   
   // Initial stack page (if needed)
   struct thread *thread = thread_current ();
@@ -343,7 +363,6 @@ static int read (int fd, void *buffer, unsigned size, void *esp)
   struct sup_page_table_entry *entry = lookup_sup_page_entry (upage);
   if (entry == NULL)
   {
-    DPRINT ("Doesn't exist in spt\n");
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
@@ -351,7 +370,6 @@ static int read (int fd, void *buffer, unsigned size, void *esp)
   // Check if page is writeable.
   if (!entry->writable)
   {
-    DPRINT ("Not writeable\n");
     set_exit_code (thread_current (), -1);
     thread_exit ();
   }
@@ -389,7 +407,8 @@ static int read (int fd, void *buffer, unsigned size, void *esp)
   {
     return -1;
   }
-  
+
+  ((int*)buffer)[0] = 0;  
   lock_acquire (&filesys_lock);
   off_t bytes_read = file_read (file_descriptor->file, buffer, size);
   lock_release (&filesys_lock);
@@ -417,6 +436,10 @@ static int write (int fd, const void *buffer, unsigned size)
   if (file_descriptor == NULL)
   {
     return 0;
+  }
+
+  if (inode_is_dir (file_descriptor->file->inode)) {
+    return -1;
   }
   
   lock_acquire (&filesys_lock);
@@ -507,12 +530,81 @@ void free_thread_resources (struct thread *t)
   file_close (t->executable);
 
   while (!list_empty (&t->file_descriptors))
-    {
-      struct list_elem *e = list_pop_front (&t->file_descriptors);
-      struct file_descriptor *f = list_entry (e, struct file_descriptor, elem);
-      file_close (f->file);
-      free (f);
-    }
+  {
+    struct list_elem *e = list_pop_front (&t->file_descriptors);
+    struct file_descriptor *f = list_entry (e, struct file_descriptor, elem);
+    file_close (f->file);
+    free (f);
+  }
+
+  dir_close (t->working_directory);
 
   lock_release (&filesys_lock);
+}
+
+bool chdir (const char *dir)
+{
+  struct dir *open_dir = path_to_directory (dir);
+  if (open_dir == NULL) {
+    return false;
+  }
+  dir_close (thread_current ()->working_directory);
+  thread_current ()->working_directory = open_dir;
+
+  return true;
+}
+
+bool mkdir (const char *dir)
+{
+  if (validate_user_pointer (dir) == NULL)
+  {
+    set_exit_code (thread_current (), -1);
+    thread_exit ();
+  }
+
+  if (strlen (dir) == 0)
+  {
+    return false;
+  }
+
+  bool success = dir_create_from_path (dir);
+
+  return success;
+}
+
+bool readdir (int fd, char *name)
+{
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (file_descriptor == NULL)
+  {
+    return false;
+  }
+  bool success = dir_readdir_file (file_descriptor->file, name);
+  return success;
+}
+
+bool isdir (int fd)
+{
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (file_descriptor == NULL)
+  {
+    return false;
+  }
+  return inode_is_dir (file_descriptor->file->inode);
+}
+
+int inumber (int fd)
+{
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (file_descriptor == NULL)
+  {
+    return 0;
+  }
+  block_sector_t inumber = inode_get_inumber (file_descriptor->file->inode);
+  return inumber;
+}
+
+int stat (char *pathname, void *buf)
+{
+  return get_file_stats (pathname, buf);
 }

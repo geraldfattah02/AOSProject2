@@ -18,6 +18,7 @@
 #include "userprog/process.h"
 #endif
 #include "vm/page.h"
+#include "../filesys/directory.h"
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -110,7 +111,7 @@ void thread_start (void)
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
-  thread_create ("idle", PRI_MIN, idle, &idle_started, NULL);
+  thread_create ("idle", PRI_MIN, idle, &idle_started, NULL, NULL);
 
   /* Start preemptive thread scheduling. */
   intr_enable ();
@@ -163,7 +164,7 @@ void thread_print_stats (void)
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
 tid_t thread_create (const char *name, int priority, thread_func *function,
-                     void *aux, struct child_thread *parent_record)
+                     void *aux, struct child_thread *parent_record, struct dir *dir)
 {
   struct thread *t;
   struct kernel_thread_frame *kf;
@@ -181,6 +182,13 @@ tid_t thread_create (const char *name, int priority, thread_func *function,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+  t->working_directory = dir;
+
+  /* Create its own copy of the working directory */
+  if (t->working_directory != NULL) {
+    block_sector_t sector =  inode_get_inumber ( dir_get_inode (t->working_directory));
+    t->working_directory = dir_open ( inode_open (sector));
+  }
 
   t->parent_record = parent_record;
   if (parent_record != NULL)
@@ -488,6 +496,8 @@ static void init_thread (struct thread *t, const char *name, int priority)
   list_init (&t->file_descriptors);
   list_init (&t->supplemental_page_table);
   lock_init (&t->supplemental_page_table_lock);
+
+  t->working_directory = NULL;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

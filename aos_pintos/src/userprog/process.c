@@ -92,7 +92,7 @@ tid_t process_execute (const char *file_and_args)
   }
   file_close (executable);
 
-  tid = thread_create (name, PRI_DEFAULT, start_process, args, record);
+  tid = thread_create (name, PRI_DEFAULT, start_process, args, record, thread_current ()->working_directory);
   if (tid == TID_ERROR)
   {
     palloc_free_page (args);

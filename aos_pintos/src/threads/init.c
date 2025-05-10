@@ -36,6 +36,7 @@
 #include "devices/ide.h"
 #include "filesys/filesys.h"
 #include "filesys/fsutil.h"
+#include "filesys/directory.h"
 #endif
 #include "vm/frame.h"
 #include "vm/swap.h"

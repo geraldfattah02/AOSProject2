@@ -63,7 +63,6 @@ bool load_spte_into_frame (void *frame, struct sup_page_table_entry *spte)
   }
 
   // Add mapping from user page to frame
-  DPRINT ("Installing %p, %p, %d\n", spte->user_page, frame, spte->writable);
   if (!install_page (spte->user_page, frame, spte->writable))
   {
     return false;
